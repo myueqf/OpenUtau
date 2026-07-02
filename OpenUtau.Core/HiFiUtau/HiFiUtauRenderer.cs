@@ -164,6 +164,7 @@ namespace OpenUtau.Core.HiFiUtau {
                     return Array.Empty<float>();
                 }
                 phone.Mel = ExtractFeatureMel(phone, model.Config, melExtractor);
+                phone.Gender = SamplePhoneGender(phrase, phone, model.Config);
                 ApplyPerPhoneControls(phone);
             }
             AlignPhoneModelFrames(phones, phrase, model.Config);
@@ -267,10 +268,33 @@ namespace OpenUtau.Core.HiFiUtau {
                     HiFiUtauMath.AddLogGain(phone.Mel, Math.Log(target / rms));
                 }
             }
-            double semitones = phone.ToneShift / 100.0;
-            if (Math.Abs(semitones) > 0.001) {
-                HiFiUtauMath.WarpMelFrequency(phone.Mel, Math.Pow(2.0, semitones / 12.0));
+            if (phone.Gender != null && phone.Gender.Any(value => Math.Abs(value) > 0.001f)) {
+                HiFiUtauMath.WarpMelFrequency(phone.Mel, phone.Gender.Select(value => value / 100f).ToArray());
+            } else {
+                double semitones = phone.ToneShift / 100.0;
+                if (Math.Abs(semitones) > 0.001) {
+                    HiFiUtauMath.WarpMelFrequency(phone.Mel, Math.Pow(2.0, semitones / 12.0));
+                }
             }
+        }
+
+        static float[]? SamplePhoneGender(RenderPhrase phrase, HiFiUtauPhone phone, HiFiUtauConfig config) {
+            if (phrase.gender == null || phrase.gender.Length == 0 || phone.Mel == null) {
+                return null;
+            }
+            int frames = phone.Mel.GetLength(1);
+            if (frames == 0) {
+                return null;
+            }
+            var gender = new float[frames];
+            double phoneStartMs = phone.PositionMs + phone.Envelope[0].X;
+            for (int i = 0; i < frames; i++) {
+                double posMs = phoneStartMs + i * config.MsPerFeatureFrame;
+                int ticks = phrase.timeAxis.MsPosToTickPos(posMs) - (phrase.position - phrase.leading);
+                int idx = Math.Clamp(ticks / DynamicInterval, 0, phrase.gender.Length - 1);
+                gender[i] = phrase.gender[idx];
+            }
+            return gender;
         }
 
         static void MatchPhtp(HiFiUtauPhone[] phones, double msPerFrame) {

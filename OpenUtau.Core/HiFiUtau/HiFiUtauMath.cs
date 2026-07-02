@@ -143,6 +143,40 @@ namespace OpenUtau.Core.HiFiUtau {
             }
         }
 
+        public static void WarpMelFrequency(float[,] mel, float[] semitoneCurve) {
+            int bins = mel.GetLength(0);
+            int frames = mel.GetLength(1);
+            if (semitoneCurve.Length == 0 || frames == 0) {
+                return;
+            }
+            var original = (float[,])mel.Clone();
+            for (int t = 0; t < frames; t++) {
+                double semitones = ResampleCurve(semitoneCurve, t, frames);
+                double factor = Math.Pow(2.0, semitones / 12.0);
+                if (Math.Abs(factor - 1.0) < 0.001) {
+                    continue;
+                }
+                for (int b = 0; b < bins; b++) {
+                    double src = Math.Clamp(b / factor, 0, bins - 1);
+                    int b0 = (int)Math.Floor(src);
+                    int b1 = Math.Min(bins - 1, b0 + 1);
+                    float frac = (float)(src - b0);
+                    mel[b, t] = original[b0, t] + (original[b1, t] - original[b0, t]) * frac;
+                }
+            }
+        }
+
+        static double ResampleCurve(float[] curve, int frame, int targetFrames) {
+            if (curve.Length == 1 || targetFrames == 1) {
+                return curve[0];
+            }
+            double src = frame * (curve.Length - 1.0) / (targetFrames - 1);
+            int i0 = (int)Math.Floor(src);
+            int i1 = Math.Min(curve.Length - 1, i0 + 1);
+            double frac = src - i0;
+            return curve[i0] + (curve[i1] - curve[i0]) * frac;
+        }
+
         public static void ApplyPhraseEdgeEnvelope(HiFiUtauPhone[] phones, float[] samples, int sampleRate) {
             if (samples.Length == 0 || phones.Length == 0) {
                 return;

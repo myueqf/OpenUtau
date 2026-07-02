@@ -23,6 +23,7 @@ namespace OpenUtau.Core.HiFiUtau {
         public int ModelEndFrame;
         public int ModelFrames;
         public Vector2[] Envelope = [];
+        public float[]? Gender;
         public float[,]? Mel;
 
         public static HiFiUtauPhone[] CreateAll(RenderPhrase phrase) {
