@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using NWaves.Transforms;
 
@@ -7,7 +8,7 @@ namespace OpenUtau.Core.HiFiUtau {
         readonly HiFiUtauConfig config;
         readonly RealFft fft;
         readonly float[] window;
-        readonly float[,] melBasis;
+        readonly MelBand[] melBands;
 
         public HiFiUtauMelExtractor(HiFiUtauConfig config) {
             this.config = config;
@@ -15,7 +16,7 @@ namespace OpenUtau.Core.HiFiUtau {
             window = Enumerable.Range(0, config.WinSize)
                 .Select(i => (float)(0.5 - 0.5 * Math.Cos(2 * Math.PI * i / (config.WinSize - 1))))
                 .ToArray();
-            melBasis = CreateMelBasis(config);
+            melBands = CreateMelBands(config);
         }
 
         public float[,] Extract(float[] audio, int[] centers) {
@@ -24,6 +25,7 @@ namespace OpenUtau.Core.HiFiUtau {
             var frame = new float[config.FftSize];
             var re = new float[bins];
             var im = new float[bins];
+            var mag = new float[bins];
             for (int t = 0; t < centers.Length; t++) {
                 Array.Clear(frame, 0, frame.Length);
                 int start = centers[t] - config.FftSize / 2;
@@ -32,11 +34,15 @@ namespace OpenUtau.Core.HiFiUtau {
                     frame[i] = audio.Length == 0 ? 0 : audio[src] * window[i];
                 }
                 fft.Direct(frame, re, im);
+                for (int b = 0; b < bins; b++) {
+                    mag[b] = (float)Math.Sqrt(re[b] * re[b] + im[b] * im[b]);
+                }
                 for (int m = 0; m < config.NumMels; m++) {
+                    var band = melBands[m];
+                    var weights = band.Weights;
                     double sum = 0;
-                    for (int b = 0; b < bins; b++) {
-                        double mag = Math.Sqrt(re[b] * re[b] + im[b] * im[b]);
-                        sum += melBasis[m, b] * mag;
+                    for (int i = 0; i < weights.Length; i++) {
+                        sum += weights[i] * mag[band.Start + i];
                     }
                     result[m, t] = (float)Math.Log(Math.Max(sum, 1e-5));
                 }
@@ -44,9 +50,9 @@ namespace OpenUtau.Core.HiFiUtau {
             return result;
         }
 
-        static float[,] CreateMelBasis(HiFiUtauConfig config) {
+        static MelBand[] CreateMelBands(HiFiUtauConfig config) {
             int fftBins = config.FftSize / 2 + 1;
-            var basis = new float[config.NumMels, fftBins];
+            var bands = new MelBand[config.NumMels];
             double minMel = HzToSlaneyMel(config.MelFMin);
             double maxMel = HzToSlaneyMel(config.MelFMax);
             var melPoints = Enumerable.Range(0, config.NumMels + 2)
@@ -61,18 +67,28 @@ namespace OpenUtau.Core.HiFiUtau {
                 int left = bins[m - 1];
                 int center = bins[m];
                 int right = bins[m + 1];
-                for (int k = left; k < center; k++) {
-                    basis[m - 1, k] = (k - left) / (float)Math.Max(1, center - left);
-                }
-                for (int k = center; k < right; k++) {
-                    basis[m - 1, k] = (right - k) / (float)Math.Max(1, right - center);
-                }
                 double enorm = 2.0 / Math.Max(1e-12, melPoints[m + 1] - melPoints[m - 1]);
+                var weights = new List<float>(Math.Max(0, right - left));
                 for (int k = left; k < right; k++) {
-                    basis[m - 1, k] *= (float)enorm;
+                    float weight = 0;
+                    if (k < center) {
+                        weight = (k - left) / (float)Math.Max(1, center - left);
+                    } else {
+                        weight = (right - k) / (float)Math.Max(1, right - center);
+                    }
+                    weight *= (float)enorm;
+                    weights.Add(weight);
                 }
+                while (weights.Count > 0 && weights[0] == 0) {
+                    weights.RemoveAt(0);
+                    left++;
+                }
+                while (weights.Count > 0 && weights[^1] == 0) {
+                    weights.RemoveAt(weights.Count - 1);
+                }
+                bands[m - 1] = new MelBand(left, weights.ToArray());
             }
-            return basis;
+            return bands;
         }
 
         static double HzToSlaneyMel(double hz) {
@@ -96,6 +112,16 @@ namespace OpenUtau.Core.HiFiUtau {
                 return minLogHz * Math.Exp(logStep * (mel - minLogMel));
             }
             return fSp * mel;
+        }
+
+        readonly struct MelBand {
+            public MelBand(int start, float[] weights) {
+                Start = start;
+                Weights = weights;
+            }
+
+            public readonly int Start;
+            public readonly float[] Weights;
         }
     }
 }
