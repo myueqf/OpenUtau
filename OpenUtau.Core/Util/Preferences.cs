@@ -112,6 +112,9 @@ namespace OpenUtau.Core.Util {
                     if (!ValidString(new Action(() => CultureInfo.GetCultureInfo(Default.Language)))) Default.Language = string.Empty;
                     if (!ValidString(new Action(() => CultureInfo.GetCultureInfo(Default.SortingOrder)))) Default.SortingOrder = string.Empty;
                     if (!Renderers.getRendererOptions().Contains(Default.DefaultRenderer)) Default.DefaultRenderer = string.Empty;
+                    if (string.IsNullOrEmpty(Default.DefaultHiFiUtauModelPath)) {
+                        Default.DefaultHiFiUtauModelPath = Renderers.HIFIUTAU_DEFAULT_MODEL;
+                    }
                     if (!Onnx.getRunnerOptions().Contains(Default.OnnxRunner)) Default.OnnxRunner = string.Empty;
                     if (Default.Theme != null) {
                         Default.ThemeName = Default.Theme switch {
@@ -156,6 +159,7 @@ namespace OpenUtau.Core.Util {
             public bool PreRender = true;
             public int NumRenderThreads = 2;
             public string DefaultRenderer = string.Empty;
+            public string DefaultHiFiUtauModelPath = Render.Renderers.HIFIUTAU_DEFAULT_MODEL;
             public int WorldlineR = 0;
             public string OnnxRunner = string.Empty;
             public int OnnxGpu = 0;

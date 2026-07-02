@@ -254,7 +254,13 @@ namespace OpenUtau.Core.Render {
                 var source = tuple.Item2;
                 var request = tuple.Item3;
                 var task = phrase.renderer.Render(phrase, progress, request.trackNo, cancellation, true);
-                task.Wait();
+                try {
+                    task.Wait();
+                } catch (AggregateException e) when (cancellation.IsCancellationRequested && IsCancellationException(e)) {
+                    break;
+                } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
+                    break;
+                }
                 if (cancellation.IsCancellationRequested) {
                     break;
                 }
@@ -265,6 +271,13 @@ namespace OpenUtau.Core.Render {
                 }
             }
             progress.Clear();
+        }
+
+        private static bool IsCancellationException(AggregateException exception) {
+            return exception
+                .Flatten()
+                .InnerExceptions
+                .All(e => e is OperationCanceledException);
         }
 
         public static void ReleaseSourceTemp() {

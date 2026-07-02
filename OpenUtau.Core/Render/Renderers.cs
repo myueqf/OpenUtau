@@ -15,8 +15,10 @@ namespace OpenUtau.Core.Render {
         public const string VOGEN = "VOGEN";
         public const string DIFFSINGER = "DIFFSINGER";
         public const string VOICEVOX = "VOICEVOX";
+        public const string HIFIUTAU = "HIFIUTAU";
+        public const string HIFIUTAU_DEFAULT_MODEL = "hifiutau";
 
-        static readonly string[] classicRenderers = new[] { WORLDLINE_R, CLASSIC };
+        static readonly string[] classicRenderers = new[] { WORLDLINE_R, CLASSIC, HIFIUTAU };
         static readonly string[] enunuRenderers = new[] { ENUNU };
         static readonly string[] vogenRenderers = new[] { VOGEN };
         static readonly string[] diffSingerRenderers = new[] { DIFFSINGER };
@@ -43,16 +45,20 @@ namespace OpenUtau.Core.Render {
         public static List<string> getRendererOptions() {
             return new List<string> {
                 "WORLDLINE-R",
-                "Classic"
+                "Classic",
+                "HiFiUTAU"
             };
         }
 
         public static string GetDefaultRenderer(USingerType singerType) {
-            if (Preferences.Default.DefaultRenderer == "Classic" && singerType == USingerType.Classic) {
-                return CLASSIC;
-            } else {
-                return GetSupportedRenderers(singerType)[0];
+            if (singerType == USingerType.Classic) {
+                return Preferences.Default.DefaultRenderer switch {
+                    "Classic" => CLASSIC,
+                    "HiFiUTAU" => HIFIUTAU,
+                    _ => GetSupportedRenderers(singerType)[0],
+                };
             }
+            return GetSupportedRenderers(singerType)[0];
         }
 
         public static IRenderer CreateRenderer(string renderer) {
@@ -70,6 +76,8 @@ namespace OpenUtau.Core.Render {
                 return new DiffSinger.DiffSingerRenderer();
             } else if (renderer == VOICEVOX) {
                 return new Voicevox.VoicevoxRenderer();
+            } else if (renderer == HIFIUTAU) {
+                return new HiFiUtau.HiFiUtauRenderer();
             }
             return null;
         }
