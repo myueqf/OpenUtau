@@ -114,13 +114,17 @@ namespace OpenUtau.Core.HiFiUtau {
             var window = AudioPostProcessingDsp.HannWindow(FftSize);
             var output = new float[originalLength + FftSize];
             var norm = new float[output.Length];
+            var fft = AudioPostProcessingDsp.CreateRealFftWorkspace(FftSize);
+            var frame = new float[FftSize];
+            var spectrum = new Complex[bins];
 
             for (int frameIndex = 0; frameIndex < frames; frameIndex++) {
                 float tv = tensionFrames[frameIndex];
                 double b = tv > 0 ? -tv / 150.0 : -tv / 50.0;
                 int outStart = frameIndex * Hop;
+                ReadFrame(samples, window, outStart, frame);
                 if (Math.Abs(b) < 0.001) {
-                    OverlapAddUnchanged(samples, window, output, norm, outStart);
+                    OverlapAdd(frame, window, output, norm, outStart);
                     continue;
                 }
 
@@ -128,13 +132,12 @@ namespace OpenUtau.Core.HiFiUtau {
                     ? 1500
                     : Math.Clamp(f0Frames[frameIndex] * 4.0, 400.0, 6000.0);
                 double x0 = bins / ((SampleRate / 2.0) / midpointHz);
-                var frame = ReadFrame(samples, window, outStart);
-                AudioPostProcessingDsp.Fft(frame, inverse: false);
+                AudioPostProcessingDsp.DirectRealFft(frame, spectrum, fft);
 
                 var originalMag = new double[bins];
                 double originalSum = 0;
                 for (int bin = 0; bin < bins; bin++) {
-                    originalMag[bin] = frame[bin].Magnitude;
+                    originalMag[bin] = spectrum[bin].Magnitude;
                     originalSum += originalMag[bin];
                 }
 
@@ -142,32 +145,23 @@ namespace OpenUtau.Core.HiFiUtau {
                 for (int bin = 0; bin < bins; bin++) {
                     double tilt = Math.Clamp((-b / Math.Max(1.0, x0)) * bin + b, -2.0, 2.0);
                     double gain = Math.Exp(tilt);
-                    frame[bin] *= gain;
+                    spectrum[bin] *= gain;
                     newSum += originalMag[bin] * gain;
-                    if (bin > 0 && bin < bins - 1) {
-                        frame[FftSize - bin] = Complex.Conjugate(frame[bin]);
-                    }
                 }
                 if (originalSum > 1e-12 && newSum > 1e-12) {
                     double comp = originalSum / newSum;
                     for (int bin = 0; bin < bins; bin++) {
-                        frame[bin] *= comp;
-                        if (bin > 0 && bin < bins - 1) {
-                            frame[FftSize - bin] = Complex.Conjugate(frame[bin]);
-                        }
+                        spectrum[bin] *= comp;
                     }
                 }
                 if (b < -0.001) {
                     double bGain = 1.0 + Math.Clamp(b / -15.0, 0.0, 0.33);
                     for (int bin = 0; bin < bins; bin++) {
-                        frame[bin] *= bGain;
-                        if (bin > 0 && bin < bins - 1) {
-                            frame[FftSize - bin] = Complex.Conjugate(frame[bin]);
-                        }
+                        spectrum[bin] *= bGain;
                     }
                 }
 
-                AudioPostProcessingDsp.Fft(frame, inverse: true);
+                AudioPostProcessingDsp.InverseRealFft(spectrum, frame, fft);
                 OverlapAdd(frame, window, output, norm, outStart);
             }
 
@@ -220,29 +214,22 @@ namespace OpenUtau.Core.HiFiUtau {
             return Math.Clamp((int)Math.Round(sampleIndex * (curve.Length - 1.0) / (sampleLength - 1)), 0, curve.Length - 1);
         }
 
-        static Complex[] ReadFrame(float[] samples, float[] window, int outStart) {
+        static void ReadFrame(float[] samples, float[] window, int outStart, float[] frame) {
             int start = outStart - FftSize / 2;
-            var frame = new Complex[FftSize];
             for (int i = 0; i < FftSize; i++) {
                 int src = AudioPostProcessingDsp.ReflectIndex(start + i, samples.Length);
-                frame[i] = new Complex(samples.Length == 0 ? 0 : samples[src] * window[i], 0);
+                frame[i] = samples.Length == 0 ? 0 : samples[src] * window[i];
             }
-            return frame;
         }
 
-        static void OverlapAddUnchanged(float[] samples, float[] window, float[] output, float[] norm, int outStart) {
-            var frame = ReadFrame(samples, window, outStart);
-            OverlapAdd(frame, window, output, norm, outStart);
-        }
-
-        static void OverlapAdd(Complex[] frame, float[] window, float[] output, float[] norm, int outStart) {
+        static void OverlapAdd(float[] frame, float[] window, float[] output, float[] norm, int outStart) {
             for (int i = 0; i < FftSize; i++) {
                 int dst = outStart + i;
                 if (dst >= output.Length) {
                     break;
                 }
                 double w = window[i];
-                output[dst] += (float)(frame[i].Real * w);
+                output[dst] += (float)(frame[i] * w);
                 norm[dst] += (float)(w * w);
             }
         }

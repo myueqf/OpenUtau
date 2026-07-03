@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Numerics;
+using NWaves.Transforms;
 using OpenUtau.Core.Render;
 using OpenUtau.Core.Ustx;
 
@@ -76,37 +77,37 @@ namespace OpenUtau.Core.HiFiUtau {
             return result;
         }
 
-        public static void Fft(Complex[] buffer, bool inverse) {
-            int n = buffer.Length;
-            for (int i = 1, j = 0; i < n; i++) {
-                int bit = n >> 1;
-                for (; (j & bit) != 0; bit >>= 1) {
-                    j ^= bit;
-                }
-                j ^= bit;
-                if (i < j) {
-                    (buffer[i], buffer[j]) = (buffer[j], buffer[i]);
-                }
+        public static RealFftWorkspace CreateRealFftWorkspace(int fftSize) {
+            return new RealFftWorkspace(fftSize);
+        }
+
+        public static void DirectRealFft(float[] frame, Complex[] spectrum, RealFftWorkspace workspace) {
+            workspace.Transform.Direct(frame, workspace.Re, workspace.Im);
+            for (int bin = 0; bin < workspace.Bins; bin++) {
+                spectrum[bin] = new Complex(workspace.Re[bin], workspace.Im[bin]);
             }
-            for (int len = 2; len <= n; len <<= 1) {
-                double angle = 2 * Math.PI / len * (inverse ? 1 : -1);
-                var wLen = new Complex(Math.Cos(angle), Math.Sin(angle));
-                for (int i = 0; i < n; i += len) {
-                    var w = Complex.One;
-                    for (int j = 0; j < len / 2; j++) {
-                        var u = buffer[i + j];
-                        var v = buffer[i + j + len / 2] * w;
-                        buffer[i + j] = u + v;
-                        buffer[i + j + len / 2] = u - v;
-                        w *= wLen;
-                    }
-                }
+        }
+
+        public static void InverseRealFft(Complex[] spectrum, float[] frame, RealFftWorkspace workspace) {
+            for (int bin = 0; bin < workspace.Bins; bin++) {
+                workspace.Re[bin] = (float)spectrum[bin].Real;
+                workspace.Im[bin] = (float)spectrum[bin].Imaginary;
             }
-            if (inverse) {
-                for (int i = 0; i < n; i++) {
-                    buffer[i] /= n;
-                }
+            workspace.Transform.InverseNorm(workspace.Re, workspace.Im, frame);
+        }
+
+        public sealed class RealFftWorkspace {
+            public RealFftWorkspace(int fftSize) {
+                Transform = new RealFft(fftSize);
+                Bins = fftSize / 2 + 1;
+                Re = new float[Bins];
+                Im = new float[Bins];
             }
+
+            public readonly RealFft Transform;
+            public readonly int Bins;
+            public readonly float[] Re;
+            public readonly float[] Im;
         }
     }
 }

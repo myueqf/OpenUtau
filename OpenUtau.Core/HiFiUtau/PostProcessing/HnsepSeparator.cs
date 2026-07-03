@@ -133,18 +133,20 @@ namespace OpenUtau.Core.HiFiUtau {
             var spec = new Complex[bins, nFrames];
             var specReal = new float[bins * nFrames];
             var specImag = new float[bins * nFrames];
+            var fft = AudioPostProcessingDsp.CreateRealFftWorkspace(nFft);
+            var frame = new float[nFft];
+            var spectrum = new Complex[bins];
             for (int t = 0; t < nFrames; t++) {
                 int idx = t * hopLength;
-                var frame = new Complex[nFft];
                 for (int i = 0; i < nFft; i++) {
-                    frame[i] = new Complex(buf[idx + i] * window[i], 0);
+                    frame[i] = buf[idx + i] * window[i];
                 }
-                AudioPostProcessingDsp.Fft(frame, inverse: false);
+                AudioPostProcessingDsp.DirectRealFft(frame, spectrum, fft);
                 for (int bin = 0; bin < bins; bin++) {
-                    spec[bin, t] = frame[bin];
+                    spec[bin, t] = spectrum[bin];
                     int flat = bin * nFrames + t;
-                    specReal[flat] = (float)frame[bin].Real;
-                    specImag[flat] = (float)frame[bin].Imaginary;
+                    specReal[flat] = (float)spectrum[bin].Real;
+                    specImag[flat] = (float)spectrum[bin].Imaginary;
                 }
             }
 
@@ -160,15 +162,11 @@ namespace OpenUtau.Core.HiFiUtau {
             var harmonicFull = new float[buf.Length];
             var norm = new float[buf.Length];
             for (int t = 0; t < nFrames; t++) {
-                var frame = new Complex[nFft];
                 for (int bin = 0; bin < bins; bin++) {
                     int flat = bin * nFrames + t;
-                    frame[bin] = spec[bin, t] * new Complex(maskReal[flat], maskImag[flat]);
-                    if (bin > 0 && bin < bins - 1) {
-                        frame[nFft - bin] = Complex.Conjugate(frame[bin]);
-                    }
+                    spectrum[bin] = spec[bin, t] * new Complex(maskReal[flat], maskImag[flat]);
                 }
-                AudioPostProcessingDsp.Fft(frame, inverse: true);
+                AudioPostProcessingDsp.InverseRealFft(spectrum, frame, fft);
                 int idx = t * hopLength;
                 for (int i = 0; i < nFft; i++) {
                     int dst = idx + i;
@@ -176,7 +174,7 @@ namespace OpenUtau.Core.HiFiUtau {
                         break;
                     }
                     double w = window[i];
-                    harmonicFull[dst] += (float)(frame[i].Real * w);
+                    harmonicFull[dst] += (float)(frame[i] * w);
                     norm[dst] += (float)(w * w);
                 }
             }
