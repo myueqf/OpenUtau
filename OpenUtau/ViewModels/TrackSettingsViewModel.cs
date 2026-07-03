@@ -48,7 +48,7 @@ namespace OpenUtau.App.ViewModels {
                 Wavtool = ToolsManager.Inst.GetWavtool(wavtoolName);
                 NeedsResampler = Renderers.CLASSIC == renderer;
                 NeedsWavtool = Renderers.CLASSIC == renderer;
-                IsNotClassic = Renderers.CLASSIC != renderer && Renderers.HIFIUTAU != renderer;
+                IsNotClassic = Renderers.CLASSIC != renderer;
             }
             this.WhenAnyValue(x => x.Resampler)
                 .Subscribe(resampler => {
@@ -91,9 +91,6 @@ namespace OpenUtau.App.ViewModels {
         }
 
         public void Finish() {
-            if (Renderers.HIFIUTAU == Track.RendererSettings.renderer) {
-                return;
-            }
             if (Renderers.CLASSIC != Track.RendererSettings.renderer) {
                 return;
             }

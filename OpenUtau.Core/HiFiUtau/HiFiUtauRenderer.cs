@@ -38,7 +38,6 @@ namespace OpenUtau.Core.HiFiUtau {
 
         public USingerType SingerType => USingerType.Classic;
         public bool SupportsRenderPitch => false;
-        public string ModelPath { get; set; } = string.Empty;
 
         public bool SupportsExpression(UExpressionDescriptor descriptor) {
             return supportedExp.Contains(descriptor.abbr);
@@ -55,46 +54,49 @@ namespace OpenUtau.Core.HiFiUtau {
         public Task<RenderResult> Render(RenderPhrase phrase, Progress progress, int trackNo, CancellationTokenSource cancellation, bool isPreRender = false) {
             return Task.Run(() => {
                 var result = Layout(phrase);
-                string progressInfo = $"Track {trackNo + 1}: {this} \"{string.Join(" ", phrase.phones.Select(p => p.phoneme))}\"";
-                progress.Complete(0, progressInfo);
+                try {
+                    string progressInfo = $"Track {trackNo + 1}: {this} \"{string.Join(" ", phrase.phones.Select(p => p.phoneme))}\"";
+                    progress.Complete(0, progressInfo);
 
-                var modelRef = string.IsNullOrEmpty(ModelPath) ? Renderers.HIFIUTAU_DEFAULT_MODEL : ModelPath;
-                var modelPath = ResolveModelPath(modelRef);
-                if (string.IsNullOrEmpty(modelPath)) {
-                    throw new MessageCustomizableException(
-                        "HiFiUTAU model package or folder is not set.",
-                        "HiFiUTAU model package or folder is not set.",
-                        new Exception("HiFiUTAU model package or folder is not set."));
-                }
+                    var modelPath = ResolveModelPath(Renderers.HIFIUTAU_DEFAULT_MODEL);
+                    if (string.IsNullOrEmpty(modelPath)) {
+                        throw new MessageCustomizableException(
+                            "HiFiUTAU model package or folder is not set.",
+                            "HiFiUTAU model package or folder is not set.",
+                            new Exception("HiFiUTAU model package or folder is not set."));
+                    }
 
-                if (cancellation.IsCancellationRequested) {
-                    return result;
-                }
-
-                var model = GetModel(modelPath);
-                var wavPath = Path.Join(PathManager.Inst.CachePath, $"hifiutau-raw-{model.Hash:x16}-{phrase.hash:x16}.wav");
-                phrase.AddCacheFile(wavPath);
-
-                if (File.Exists(wavPath)) {
-                    using var waveStream = Wave.OpenFile(wavPath);
-                    result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
-                }
-                if (result.samples == null) {
-                    var phones = HiFiUtauPhone.CreateAll(phrase);
-                    result.samples = RenderFeaturePipeline(phones, phrase, model, cancellation.Token);
                     if (cancellation.IsCancellationRequested) {
                         return result;
                     }
-                    HiFiUtauMath.ApplyPhraseEdgeEnvelope(phones, result.samples, HiFiUtauConfig.OutputSampleRate);
-                    WriteCacheWave(wavPath, result.samples);
-                }
 
-                progress.Complete(phrase.phones.Length, progressInfo);
-                if (result.samples != null) {
-                    AudioPostProcessor.Apply(phrase, result, modelPath);
-                    Renderers.ApplyDynamics(phrase, result);
+                    var model = GetModel(modelPath);
+                    var wavPath = Path.Join(PathManager.Inst.CachePath, $"hifiutau-raw-{model.Hash:x16}-{phrase.hash:x16}.wav");
+                    phrase.AddCacheFile(wavPath);
+
+                    if (File.Exists(wavPath)) {
+                        using var waveStream = Wave.OpenFile(wavPath);
+                        result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
+                    }
+                    if (result.samples == null) {
+                        var phones = HiFiUtauPhone.CreateAll(phrase);
+                        result.samples = RenderFeaturePipeline(phones, phrase, model, cancellation.Token);
+                        if (cancellation.IsCancellationRequested) {
+                            return result;
+                        }
+                        HiFiUtauMath.ApplyPhraseEdgeEnvelope(phones, result.samples, HiFiUtauConfig.OutputSampleRate);
+                        WriteCacheWave(wavPath, result.samples);
+                    }
+
+                    progress.Complete(phrase.phones.Length, progressInfo);
+                    if (result.samples != null) {
+                        AudioPostProcessor.Apply(phrase, result, modelPath);
+                        Renderers.ApplyDynamics(phrase, result);
+                    }
+                    return result;
+                } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
+                    return result;
                 }
-                return result;
             });
         }
 

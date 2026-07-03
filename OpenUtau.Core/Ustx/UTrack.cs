@@ -12,7 +12,6 @@ namespace OpenUtau.Core.Ustx {
         public string renderer;
         public string resampler;
         public string wavtool;
-        public string hifiUtauModelPath;
 
         [YamlIgnore] public IRenderer Renderer { get; set; }
         [YamlIgnore] public IResampler Resampler { get; set; }
@@ -32,10 +31,6 @@ namespace OpenUtau.Core.Ustx {
                 renderer = Renderers.GetDefaultRenderer(track.Singer.SingerType);
             }
             if (renderer != Renderer?.ToString()) {
-                Renderer = Renderers.CreateRenderer(renderer);
-            }
-            if (Renderer == null || Renderer.SingerType != track.Singer.SingerType) {
-                renderer = Renderers.GetDefaultRenderer(track.Singer.SingerType);
                 Renderer = Renderers.CreateRenderer(renderer);
             }
             if (renderer == Renderers.CLASSIC) {
@@ -61,16 +56,6 @@ namespace OpenUtau.Core.Ustx {
                 wavtool = null;
                 Wavtool = null;
             }
-            if (renderer == Renderers.HIFIUTAU) {
-                if (string.IsNullOrEmpty(hifiUtauModelPath)) {
-                    hifiUtauModelPath = string.IsNullOrEmpty(Util.Preferences.Default.DefaultHiFiUtauModelPath)
-                        ? Renderers.HIFIUTAU_DEFAULT_MODEL
-                        : Util.Preferences.Default.DefaultHiFiUtauModelPath;
-                }
-                if (Renderer is HiFiUtau.HiFiUtauRenderer hiFiUtauRenderer) {
-                    hiFiUtauRenderer.ModelPath = hifiUtauModelPath;
-                }
-            }
         }
 
         public URenderSettings Clone() {
@@ -78,7 +63,6 @@ namespace OpenUtau.Core.Ustx {
                 renderer = renderer,
                 resampler = resampler,
                 wavtool = wavtool,
-                hifiUtauModelPath = hifiUtauModelPath,
             };
         }
     }

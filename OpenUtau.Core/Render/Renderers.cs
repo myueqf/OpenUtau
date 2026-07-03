@@ -16,7 +16,7 @@ namespace OpenUtau.Core.Render {
         public const string DIFFSINGER = "DIFFSINGER";
         public const string VOICEVOX = "VOICEVOX";
         public const string HIFIUTAU = "HIFIUTAU";
-        public const string HIFIUTAU_DEFAULT_MODEL = "hifiutau";
+        public const string HIFIUTAU_DEFAULT_MODEL = "hifiutau-pc-nsf-hifigan";
 
         static readonly string[] classicRenderers = new[] { WORLDLINE_R, CLASSIC, HIFIUTAU };
         static readonly string[] enunuRenderers = new[] { ENUNU };
