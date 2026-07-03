@@ -15,15 +15,15 @@ namespace OpenUtau.Core.HiFiUtau {
         static readonly object separatorLock = new object();
         static readonly Dictionary<string, HnsepSeparator> separators = new Dictionary<string, HnsepSeparator>();
 
-        public static void Apply(RenderPhrase phrase, RenderResult result, string? modelLocation = null) {
+        public static void Apply(RenderPhrase phrase, RenderResult result) {
             if (result.samples == null || result.samples.Length == 0) {
                 return;
             }
 
-            ApplyHnsepCurves(phrase, result.samples, modelLocation);
+            ApplyHnsepCurves(phrase, result.samples);
         }
 
-        static void ApplyHnsepCurves(RenderPhrase phrase, float[] samples, string? modelLocation) {
+        static void ApplyHnsepCurves(RenderPhrase phrase, float[] samples) {
             bool needBreath = HasNonDefaultCurve(phrase.breathiness, 0, 0.5f);
             bool needTension = HasNonDefaultCurve(phrase.tension, 0, 0.5f);
             bool needVoicing = HasNonDefaultCurve(phrase.voicing, 100, 0.5f);
@@ -31,7 +31,7 @@ namespace OpenUtau.Core.HiFiUtau {
                 return;
             }
 
-            var hnsep = GetSeparator(modelLocation);
+            var hnsep = GetSeparator();
 
             var (harmonic, noise) = hnsep.Separate(samples);
             int length = Math.Min(samples.Length, Math.Min(harmonic.Length, noise.Length));
@@ -53,11 +53,11 @@ namespace OpenUtau.Core.HiFiUtau {
             MixComponents(samples, harmonic, noise, length);
         }
 
-        static HnsepSeparator GetSeparator(string? modelLocation) {
-            if (!HnsepSeparator.TryResolveModelPath(modelLocation, out var modelPath)) {
+        static HnsepSeparator GetSeparator() {
+            if (!HnsepSeparator.TryResolveModelPath(out var modelPath)) {
                 throw Error(
                     "HN-SEP model is required for HiFiUTAU BREC/TENC/VOIC.",
-                    new FileNotFoundException("HN-SEP model package hnsep-vr-44.1k-hop512 is not installed."),
+                    new FileNotFoundException("HN-SEP model package hnsep_VR_44.1k_hop512_240512 is not installed."),
                     false);
             }
             lock (separatorLock) {

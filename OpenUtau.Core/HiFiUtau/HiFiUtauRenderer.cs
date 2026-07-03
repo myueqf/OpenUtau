@@ -90,7 +90,7 @@ namespace OpenUtau.Core.HiFiUtau {
 
                     progress.Complete(phrase.phones.Length, progressInfo);
                     if (result.samples != null) {
-                        AudioPostProcessor.Apply(phrase, result, modelPath);
+                        AudioPostProcessor.Apply(phrase, result);
                         Renderers.ApplyDynamics(phrase, result);
                     }
                     return result;

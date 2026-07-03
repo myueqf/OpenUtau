@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
@@ -9,11 +8,10 @@ using OpenUtau.Core.Util;
 
 namespace OpenUtau.Core.HiFiUtau {
     class HnsepSeparator {
-        const string DefaultPackage = "hnsep-vr-44.1k-hop512";
+        const string HnsepVrPackage = "hnsep_VR_44.1k_hop512_240512";
 
         readonly InferenceSession session;
         readonly object sessionLock = new object();
-        readonly bool isPt2;
         readonly int nFft;
         readonly int hopLength;
         readonly int segmentLength;
@@ -21,34 +19,22 @@ namespace OpenUtau.Core.HiFiUtau {
 
         HnsepSeparator(string modelPath, int nFft, int hopLength) {
             session = Onnx.getInferenceSession(modelPath);
-            isPt2 = session.OutputMetadata.ContainsKey("mask_real") && session.OutputMetadata.ContainsKey("mask_imag");
             this.nFft = nFft;
             this.hopLength = hopLength;
             segmentLength = 32 * hopLength;
             window = AudioPostProcessingDsp.HannWindow(nFft);
         }
 
-        public static bool TryResolveModelPath(string? modelLocation, out string modelPath) {
+        public static bool TryResolveModelPath(out string modelPath) {
             modelPath = string.Empty;
-            var candidates = new List<string>();
-            if (!string.IsNullOrEmpty(modelLocation)) {
-                candidates.Add(Path.Combine(modelLocation, "hnsep_onnx"));
-                candidates.Add(Path.Combine(Path.GetDirectoryName(modelLocation) ?? string.Empty, "hnsep_onnx"));
+            var packagePath = PackageManager.Inst.GetInstalledPath(HnsepVrPackage);
+            if (string.IsNullOrEmpty(packagePath) || !Directory.Exists(packagePath)) {
+                return false;
             }
-            var packagePath = PackageManager.Inst.GetInstalledPath(DefaultPackage);
-            if (!string.IsNullOrEmpty(packagePath)) {
-                candidates.Add(packagePath);
-            }
-
-            foreach (var location in candidates.Distinct()) {
-                foreach (var dir in CandidateModelDirs(location)) {
-                    modelPath = ResolveModelPath(dir);
-                    if (string.IsNullOrEmpty(modelPath)) {
-                        continue;
-                    }
-                    modelPath = Path.GetFullPath(modelPath);
-                    return true;
-                }
+            modelPath = ResolveModelPath(packagePath);
+            if (!string.IsNullOrEmpty(modelPath)) {
+                modelPath = Path.GetFullPath(modelPath);
+                return true;
             }
             return false;
         }
@@ -61,32 +47,11 @@ namespace OpenUtau.Core.HiFiUtau {
 
         public (float[] harmonic, float[] noise) Separate(float[] waveform) {
             lock (sessionLock) {
-                return isPt2 ? SeparatePt2(waveform) : SeparateLegacy(waveform);
-            }
-        }
-
-        static IEnumerable<string> CandidateModelDirs(string location) {
-            if (string.IsNullOrEmpty(location)) {
-                yield break;
-            }
-            if (Directory.Exists(location)) {
-                yield return location;
-                var child = Path.Combine(location, "hnsep_onnx");
-                if (Directory.Exists(child)) {
-                    yield return child;
-                }
+                return SeparateHnsep(waveform);
             }
         }
 
         static string ResolveModelPath(string dir) {
-            var pt2Path = Path.Combine(dir, "hnsep_VR_44.1k_hop512_2024.05.pt2.onnx");
-            if (File.Exists(pt2Path)) {
-                return pt2Path;
-            }
-            var legacyPath = Path.Combine(dir, "hnsep_VR_44.1k_hop512_2024.05.onnx");
-            if (File.Exists(legacyPath)) {
-                return legacyPath;
-            }
             return Directory.GetFiles(dir, "*.onnx").FirstOrDefault() ?? string.Empty;
         }
 
@@ -110,15 +75,7 @@ namespace OpenUtau.Core.HiFiUtau {
             return (nFft, hop);
         }
 
-        (float[] harmonic, float[] noise) SeparateLegacy(float[] waveform) {
-            var tensor = new DenseTensor<float>(waveform, new[] { 1, waveform.Length });
-            using var results = session.Run(new[] { NamedOnnxValue.CreateFromTensor("waveform", tensor) });
-            var harmonic = results.First(result => result.Name == "harmonic").AsTensor<float>().ToArray();
-            var noise = results.First(result => result.Name == "noise").AsTensor<float>().ToArray();
-            return (harmonic, noise);
-        }
-
-        (float[] harmonic, float[] noise) SeparatePt2(float[] waveform) {
+        (float[] harmonic, float[] noise) SeparateHnsep(float[] waveform) {
             int nSamples = waveform.Length;
             int t1 = nSamples + hopLength;
             int tPad = segmentLength * ((t1 - 1) / segmentLength + 1) - t1;
