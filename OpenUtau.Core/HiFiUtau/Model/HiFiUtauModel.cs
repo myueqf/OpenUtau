@@ -42,6 +42,7 @@ namespace OpenUtau.Core.HiFiUtau {
         }
 
         public float[,,] ProcessFeatureSplice(HiFiUtauPhone[] phones) {
+            // 按模型hop帧时间线拼接音素，重叠处在隐空间交叉淡化
             double ratio = Config.FeatureHop / (double)Config.ModelHop;
             var segments = new List<float[,,]>();
             int previousEndFrame = 0;
@@ -90,6 +91,7 @@ namespace OpenUtau.Core.HiFiUtau {
             for (int i = 0; i < f0.Length; i++) {
                 f0[i] = f0Input.Length == 0 ? 440 : f0Input[Math.Min(i, f0Input.Length - 1)];
             }
+            // part2 需要首尾上下文，合成后裁掉补帧
             if (Config.FrontPadFrames > 0) {
                 feat = PadFeatEdges(feat, Config.FrontPadFrames * Config.FeatUpsample, left: true);
                 f0 = PadF0(f0, Config.FrontPadFrames, left: true);

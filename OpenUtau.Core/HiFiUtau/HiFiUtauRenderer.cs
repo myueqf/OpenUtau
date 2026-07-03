@@ -189,9 +189,11 @@ namespace OpenUtau.Core.HiFiUtau {
             double stretch = HiFiUtauMath.StretchFactor(phone.Velocity);
             double preToLeftMs = phone.PreutterMs * stretch + phone.Envelope[0].X;
             if (preToLeftMs < 0) {
+                // 尽可能保留起点前的真实音频
                 startSample = Math.Max(0, startSample - 12 * config.FeatureHop);
             }
 
+            // 提取 mel 时加 STFT 上下文，再裁掉边缘补帧
             int padContext = (config.FftSize / 2 + config.FeatureHop - 1) / config.FeatureHop * config.FeatureHop;
             int padFront = Math.Min(padContext, startSample);
             int padTail = Math.Min(padContext, audio.Length - endSample);

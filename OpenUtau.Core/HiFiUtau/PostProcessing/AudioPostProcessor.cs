@@ -106,6 +106,7 @@ namespace OpenUtau.Core.HiFiUtau {
         }
 
         static float[] ApplyTension(float[] samples, float[]? tension, RenderPhrase phrase) {
+            // 频谱倾斜锚定在约第四谐波，随音高变化
             int originalLength = samples.Length;
             int frames = Math.Max(1, (originalLength + Hop - 1) / Hop + 1);
             int bins = FftSize / 2 + 1;
