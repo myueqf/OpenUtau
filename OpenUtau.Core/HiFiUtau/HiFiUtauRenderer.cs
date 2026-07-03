@@ -31,7 +31,6 @@ namespace OpenUtau.Core.HiFiUtau {
             Format.Ustx.BREC,
             Format.Ustx.TENC,
             Format.Ustx.VOIC,
-            Format.Ustx.LPF,
             Format.Ustx.NORM,
             "phtp",
             "strt",
@@ -92,6 +91,7 @@ namespace OpenUtau.Core.HiFiUtau {
 
                 progress.Complete(phrase.phones.Length, progressInfo);
                 if (result.samples != null) {
+                    AudioPostProcessor.Apply(phrase, result, modelPath);
                     Renderers.ApplyDynamics(phrase, result);
                 }
                 return result;
