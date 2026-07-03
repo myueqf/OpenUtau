@@ -273,7 +273,7 @@ namespace OpenUtau.Core.HiFiUtau {
                 }
             }
             if (phone.Gender != null && phone.Gender.Any(value => Math.Abs(value) > 0.001f)) {
-                HiFiUtauMath.WarpMelFrequency(phone.Mel, phone.Gender.Select(value => value / 100f).ToArray());
+                HiFiUtauMath.WarpMelFrequency(phone.Mel, phone.Gender.Select(value => -value / 100f).ToArray());
             } else {
                 double semitones = phone.ToneShift / 100.0;
                 if (Math.Abs(semitones) > 0.001) {
