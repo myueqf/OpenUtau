@@ -34,7 +34,10 @@ namespace OpenUtau.Core.HiFiUtau {
             Format.Ustx.VOIC,
             Format.Ustx.NORM,
             "phtp",
-            "strt",
+            "stm",
+            "brel",
+            "breh",
+            "bri",
         };
 
         public USingerType SingerType => USingerType.Classic;
@@ -110,10 +113,16 @@ namespace OpenUtau.Core.HiFiUtau {
                         }
                         if (result.samples != null) {
                             // HN-SEP processing with caching
+                            var brelCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "brel")?.Item2;
+                            var brehCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "breh")?.Item2;
+                            var briCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "bri")?.Item2;
                             bool needBreath = AudioPostProcessor.HasNonDefaultCurve(phrase.breathiness, 0, 0.5f);
                             bool needTension = AudioPostProcessor.HasNonDefaultCurve(phrase.tension, 0, 0.5f);
                             bool needVoicing = AudioPostProcessor.HasNonDefaultCurve(phrase.voicing, 100, 0.5f);
-                            if (needBreath || needTension || needVoicing) {
+                            bool needBrel = AudioPostProcessor.HasNonDefaultCurve(brelCurve, 0, 0.5f);
+                            bool needBreh = AudioPostProcessor.HasNonDefaultCurve(brehCurve, 0, 0.5f);
+                            bool needBri = AudioPostProcessor.HasNonDefaultCurve(briCurve, 0, 0.5f);
+                            if (needBreath || needTension || needVoicing || needBrel || needBreh || needBri) {
                                 float[] harmonic, noise;
                                 if (File.Exists(hnsepHarmonicPath) && File.Exists(hnsepNoisePath)) {
                                     harmonic = LoadCacheWave(hnsepHarmonicPath);
@@ -124,7 +133,8 @@ namespace OpenUtau.Core.HiFiUtau {
                                     WriteCacheWave(hnsepHarmonicPath, harmonic);
                                     WriteCacheWave(hnsepNoisePath, noise);
                                 }
-                                AudioPostProcessor.ApplyWithSeparated(phrase, result, harmonic, noise);
+                                AudioPostProcessor.ApplyWithSeparated(phrase, result, harmonic, noise,
+                                    brelCurve, brehCurve, briCurve);
                             } else {
                                 AudioPostProcessor.Apply(phrase, result);
                             }
@@ -239,8 +249,11 @@ namespace OpenUtau.Core.HiFiUtau {
                 phone.Gender = SamplePhoneGender(phrase, phone, model.Config);
                 ApplyPerPhoneControls(phone);
             }
-            AlignPhoneModelFrames(phones, phrase, model.Config);
             MatchPhtp(phones, model.Config.MsPerFeatureFrame);
+            foreach (var phone in phones) {
+                ApplyPhoneEnvelope(phone);
+            }
+            AlignPhoneModelFrames(phones, phrase, model.Config);
             var f0 = SampleF0(phrase, model.Config.ModelHop, model.Config.SampleRate);
             var feat = model.ProcessFeatureSplice(phones);
             return model.Synthesize(feat, f0);
@@ -290,7 +303,7 @@ namespace OpenUtau.Core.HiFiUtau {
             targetConFrames = Math.Min(targetConFrames, Math.Max(1, totalFrames - 1));
             int targetVowFrames = Math.Max(0, totalFrames - targetConFrames);
 
-            if (phone.StretchMode == 1 && vowFramesOrig > 1 && targetVowFrames > vowFramesOrig * 1.5) {
+            if (phone.StretchMode == (int)StretchMode.Loop && vowFramesOrig > 1 && targetVowFrames > vowFramesOrig * 1.5) {
                 melFull = HiFiUtauMath.ReflectPadVowel(
                     melFull,
                     conFramesOrig,
@@ -306,6 +319,13 @@ namespace OpenUtau.Core.HiFiUtau {
                 targetConFrames,
                 vowFramesOrig,
                 stretch);
+
+            // strt=1 (loop): normalize vowel energy to linear gradient
+            if (phone.StretchMode == (int)StretchMode.Loop && targetVowFrames > 1 &&
+                melOut.GetLength(1) >= targetConFrames + 2) {
+                HiFiUtauMath.NormalizeLoopVowelEnergy(melOut, targetConFrames);
+            }
+
             if (preToLeftMs > 0) {
                 int leftCutFrames = (int)(preToLeftMs / config.MsPerFeatureFrame);
                 melOut = HiFiUtauMath.SliceMel(melOut, Math.Min(leftCutFrames, melOut.GetLength(1)), melOut.GetLength(1));
@@ -347,7 +367,13 @@ namespace OpenUtau.Core.HiFiUtau {
                     HiFiUtauMath.WarpMelFrequency(phone.Mel, Math.Pow(2.0, semitones / 12.0));
                 }
             }
-            // Apply per-phone envelope amplitude last (replaces Volume parameter)
+        }
+
+        static void ApplyPhoneEnvelope(HiFiUtauPhone phone) {
+            if (phone.Mel == null || phone.Mel.GetLength(1) == 0) {
+                return;
+            }
+            // Apply per-phone envelope amplitude after phtp (replaces Volume parameter)
             if (phone.Envelope != null && phone.Envelope.Length >= 5) {
                 HiFiUtauMath.ApplyEnvelopeToMel(phone.Mel, phone.Envelope);
             }
@@ -427,8 +453,35 @@ namespace OpenUtau.Core.HiFiUtau {
 
         public UExpressionDescriptor[] GetSuggestedExpressions(USinger singer, URenderSettings renderSettings) {
             return new[] {
-                new UExpressionDescriptor("phoneme type", "phtp", false, new[] { "normal", "follow next", "follow previous" }),
-                new UExpressionDescriptor("stretch mode", "strt", false, new[] { "stretch", "loop" }),
+                new UExpressionDescriptor("phoneme type", "phtp", true, new[] { "normal", "follow next", "follow previous" }),
+                new UExpressionDescriptor("stretch mode", "stm", true, new[] { "none", "loop" }),
+                new UExpressionDescriptor {
+                    name = "breath low (curve)",
+                    abbr = "brel",
+                    type = UExpressionType.Curve,
+                    min = -100,
+                    max = 100,
+                    defaultValue = 0,
+                    isFlag = false,
+                },
+                new UExpressionDescriptor {
+                    name = "breath high (curve)",
+                    abbr = "breh",
+                    type = UExpressionType.Curve,
+                    min = -100,
+                    max = 100,
+                    defaultValue = 0,
+                    isFlag = false,
+                },
+                new UExpressionDescriptor {
+                    name = "brightness (curve)",
+                    abbr = "bri",
+                    type = UExpressionType.Curve,
+                    min = -100,
+                    max = 100,
+                    defaultValue = 0,
+                    isFlag = false,
+                },
             };
         }
 
