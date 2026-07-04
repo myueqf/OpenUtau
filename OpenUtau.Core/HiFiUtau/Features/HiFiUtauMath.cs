@@ -177,26 +177,78 @@ namespace OpenUtau.Core.HiFiUtau {
             return curve[i0] + (curve[i1] - curve[i0]) * frac;
         }
 
+        public static void ApplyEnvelopeToMel(float[,] mel, Vector2[] envelope) {
+            int totalFrames = mel.GetLength(1);
+            if (totalFrames <= 0 || envelope == null || envelope.Length < 5) {
+                return;
+            }
+
+            double envRange = envelope[4].X - envelope[0].X;
+            if (envRange <= 0) {
+                return;
+            }
+
+            // Map envelope points to frame indices (proportional mapping)
+            double f1 = (envelope[1].X - envelope[0].X) / envRange * (totalFrames - 1);
+            double f2 = (envelope[2].X - envelope[0].X) / envRange * (totalFrames - 1);
+            double f3 = (envelope[3].X - envelope[0].X) / envRange * (totalFrames - 1);
+
+            // Envelope rules:
+            // p0→p1: crossfade region, use p1.Y constant
+            // p1→p2: linear transition p1.Y → p2.Y
+            // p2→p3: linear transition p2.Y → p3.Y
+            // p3→p4: crossfade region, use p3.Y constant
+            float y1 = envelope[1].Y / 100f;
+            float y2 = envelope[2].Y / 100f;
+            float y3 = envelope[3].Y / 100f;
+
+            var gains = new float[totalFrames];
+            for (int t = 0; t < totalFrames; t++) {
+                float gain;
+                if (t <= f1) {
+                    gain = y1;
+                } else if (t <= f2) {
+                    double frac = f2 > f1 ? (t - f1) / (f2 - f1) : 1.0;
+                    gain = y1 + (float)((y2 - y1) * frac);
+                } else if (t <= f3) {
+                    double frac = f3 > f2 ? (t - f2) / (f3 - f2) : 1.0;
+                    gain = y2 + (float)((y3 - y2) * frac);
+                } else {
+                    gain = y3;
+                }
+                gains[t] = gain;
+            }
+
+            // Apply gains to mel (log domain)
+            int bins = mel.GetLength(0);
+            for (int t = 0; t < totalFrames; t++) {
+                float logGain = (float)Math.Log(Math.Max(gains[t], 1e-10));
+                for (int b = 0; b < bins; b++) {
+                    mel[b, t] += logGain;
+                }
+            }
+        }
+
         public static void ApplyPhraseEdgeEnvelope(HiFiUtauPhone[] phones, float[] samples, int sampleRate) {
             if (samples.Length == 0 || phones.Length == 0) {
                 return;
             }
+            // Fade-in: linear 0 → 1.0 across p0.X to p1.X
             var first = phones[0].Envelope;
             int fadeIn = Math.Max(0, (int)Math.Round((first[1].X - first[0].X) * sampleRate / 1000.0));
             fadeIn = Math.Min(fadeIn, samples.Length);
-            if (fadeIn > 1 && first[0].Y < first[1].Y) {
+            if (fadeIn > 1) {
                 for (int i = 0; i < fadeIn; i++) {
-                    float g = (float)(Math.Max(first[0].Y / 100.0, 1e-6) + (first[1].Y - first[0].Y) / 100.0 * i / (fadeIn - 1));
-                    samples[i] *= g;
+                    samples[i] *= (float)i / (fadeIn - 1);
                 }
             }
+            // Fade-out: linear 1.0 → 0 across p3.X to p4.X
             var last = phones[^1].Envelope;
             int fadeOut = Math.Max(0, (int)Math.Round((last[4].X - last[3].X) * sampleRate / 1000.0));
             fadeOut = Math.Min(fadeOut, samples.Length);
-            if (fadeOut > 1 && last[3].Y > last[4].Y) {
+            if (fadeOut > 1) {
                 for (int i = 0; i < fadeOut; i++) {
-                    float g = (float)(last[3].Y / 100.0 + (last[4].Y - last[3].Y) / 100.0 * i / (fadeOut - 1));
-                    samples[samples.Length - fadeOut + i] *= g;
+                    samples[samples.Length - fadeOut + i] *= (float)(fadeOut - 1 - i) / (fadeOut - 1);
                 }
             }
         }

@@ -331,9 +331,6 @@ namespace OpenUtau.Core.HiFiUtau {
             if (phone.Mel == null || phone.Mel.GetLength(1) == 0) {
                 return;
             }
-            if (Math.Abs(phone.Volume - 1.0) > 1e-6) {
-                HiFiUtauMath.AddLogGain(phone.Mel, Math.Log(phone.Volume));
-            }
             var normalize = phone.Normalize / 100.0;
             if (normalize > 0) {
                 double rms = HiFiUtauMath.MelRms(phone.Mel);
@@ -349,6 +346,10 @@ namespace OpenUtau.Core.HiFiUtau {
                 if (Math.Abs(semitones) > 0.001) {
                     HiFiUtauMath.WarpMelFrequency(phone.Mel, Math.Pow(2.0, semitones / 12.0));
                 }
+            }
+            // Apply per-phone envelope amplitude last (replaces Volume parameter)
+            if (phone.Envelope != null && phone.Envelope.Length >= 5) {
+                HiFiUtauMath.ApplyEnvelopeToMel(phone.Mel, phone.Envelope);
             }
         }
 
