@@ -17,6 +17,7 @@ namespace OpenUtau.Core.HiFiUtau {
 
         readonly InferenceSession part1;
         readonly InferenceSession part2;
+        readonly object sessionLock = new object();
         readonly object featureCacheLock = new object();
         readonly Dictionary<ulong, float[,,]> featureCache = new Dictionary<ulong, float[,,]>();
         readonly Queue<ulong> featureCacheOrder = new Queue<ulong>();
@@ -157,10 +158,12 @@ namespace OpenUtau.Core.HiFiUtau {
 
         float[,,] Part1Encode(float[,] mel) {
             var tensor = new DenseTensor<float>(FlattenMel(mel), new[] { 1, Config.NumMels, mel.GetLength(1) });
-            using var results = part1.Run(new[] { NamedOnnxValue.CreateFromTensor("mel", tensor) });
-            var output = results.First().AsTensor<float>();
-            var dims = output.Dimensions.ToArray();
-            return To3D(output.ToArray(), dims[0], dims[1], dims[2]);
+            lock (sessionLock) {
+                using var results = part1.Run(new[] { NamedOnnxValue.CreateFromTensor("mel", tensor) });
+                var output = results.First().AsTensor<float>();
+                var dims = output.Dimensions.ToArray();
+                return To3D(output.ToArray(), dims[0], dims[1], dims[2]);
+            }
         }
 
         float[] Part2Synthesize(float[,,] feat, float[] f0) {
@@ -168,11 +171,13 @@ namespace OpenUtau.Core.HiFiUtau {
                 FlattenFeat(feat),
                 new[] { 1, feat.GetLength(1), feat.GetLength(2) });
             var f0Tensor = new DenseTensor<float>(f0, new[] { 1, f0.Length });
-            using var results = part2.Run(new[] {
-                NamedOnnxValue.CreateFromTensor("feat", featTensor),
-                NamedOnnxValue.CreateFromTensor("f0", f0Tensor),
-            });
-            return results.First().AsTensor<float>().ToArray();
+            lock (sessionLock) {
+                using var results = part2.Run(new[] {
+                    NamedOnnxValue.CreateFromTensor("feat", featTensor),
+                    NamedOnnxValue.CreateFromTensor("f0", f0Tensor),
+                });
+                return results.First().AsTensor<float>().ToArray();
+            }
         }
 
         static float[] FlattenMel(float[,] mel) {
