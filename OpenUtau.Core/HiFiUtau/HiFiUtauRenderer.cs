@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using K4os.Hash.xxHash;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using OpenUtau.Classic;
@@ -72,7 +73,8 @@ namespace OpenUtau.Core.HiFiUtau {
 
                     var model = GetModel(modelPath);
                     var finalWavPath = Path.Join(PathManager.Inst.CachePath, $"hifiutau-{model.Hash:x16}-{phrase.hash:x16}.wav");
-                    var rawWavPath = Path.Join(PathManager.Inst.CachePath, $"hifiutau-raw-{model.Hash:x16}-{phrase.hash:x16}.wav");
+                    var rawHash = ComputeRawHash(phrase);
+                    var rawWavPath = Path.Join(PathManager.Inst.CachePath, $"hifiutau-raw-{model.Hash:x16}-{rawHash:x16}.wav");
                     phrase.AddCacheFile(finalWavPath);
                     phrase.AddCacheFile(rawWavPath);
 
@@ -106,6 +108,31 @@ namespace OpenUtau.Core.HiFiUtau {
                     return result;
                 }
             });
+        }
+
+        static ulong ComputeRawHash(RenderPhrase phrase) {
+            using var stream = new MemoryStream();
+            using (var writer = new BinaryWriter(stream)) {
+                writer.Write(phrase.preEffectHash);
+                WriteCurve(writer, phrase.pitches);
+                WriteCurve(writer, phrase.gender);
+                WriteCurve(writer, phrase.toneShift);
+                foreach (var phone in phrase.phones) {
+                    writer.Write(phone.toneShift);
+                }
+            }
+            return XXH64.DigestOf(stream.ToArray());
+        }
+
+        static void WriteCurve(BinaryWriter writer, float[]? curve) {
+            if (curve == null) {
+                writer.Write("null");
+                return;
+            }
+            writer.Write(curve.Length);
+            foreach (var value in curve) {
+                writer.Write(value);
+            }
         }
 
         static HiFiUtauModel GetModel(string modelPath) {
