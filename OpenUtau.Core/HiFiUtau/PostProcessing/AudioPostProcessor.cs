@@ -31,6 +31,65 @@ namespace OpenUtau.Core.HiFiUtau {
             ApplyHnsepCurvesWithSeparated(phrase, result.samples, harmonic, noise, brelCurve, brehCurve, briCurve);
         }
 
+        public static void ApplyGrowl(float[] samples, float[]? growlCurve, int sampleRate, float[]? pitchHzCurve = null) {
+            if (samples == null || samples.Length == 0 || growlCurve == null || growlCurve.Length == 0) {
+                return;
+            }
+
+            var growlValues = AudioPostProcessingDsp.ResampleCurve(growlCurve, samples.Length, 0f);
+            int nSamples = samples.Length;
+            if (nSamples <= 1) {
+                return;
+            }
+
+            var basePhase = new double[nSamples];
+            var freq = new double[nSamples];
+            if (pitchHzCurve != null && pitchHzCurve.Length > 0) {
+                var pitchValues = AudioPostProcessingDsp.ResampleCurve(pitchHzCurve, nSamples, 120f);
+                for (int i = 0; i < nSamples; i++) {
+                    freq[i] = Math.Clamp(pitchValues[i] * 0.35, 80.0, 240.0);
+                }
+            } else {
+                for (int i = 0; i < nSamples; i++) {
+                    freq[i] = 120.0;
+                }
+            }
+
+            double dt = 1.0 / sampleRate;
+            double phase = 0.0;
+            for (int i = 0; i < nSamples; i++) {
+                phase += freq[i] * dt * 2.0 * Math.PI;
+                basePhase[i] = phase;
+            }
+
+            double maxDelaySec = 0.00012;
+            var output = new float[nSamples];
+            double peak = 0.0;
+            for (int i = 0; i < nSamples; i++) {
+                double depth = Math.Pow(Math.Clamp(growlValues[i] / 100.0, 0.0, 1.0), 0.8);
+                if (depth <= 1e-6) {
+                    output[i] = samples[i];
+                    continue;
+                }
+
+                double t = i / (double)sampleRate;
+                double delaySec = depth * maxDelaySec * Math.Sin(basePhase[i]);
+                double srcTime = Math.Clamp(t + delaySec, 0.0, (nSamples - 1) / (double)sampleRate);
+                int srcIndex = (int)Math.Round(srcTime * sampleRate);
+                srcIndex = Math.Clamp(srcIndex, 0, nSamples - 1);
+                output[i] = samples[srcIndex];
+                peak = Math.Max(peak, Math.Abs(output[i]));
+            }
+
+            if (peak > 1.0) {
+                for (int i = 0; i < nSamples; i++) {
+                    output[i] *= (float)(1.0 / peak);
+                }
+            }
+
+            Array.Copy(output, samples, nSamples);
+        }
+
         static void ApplyHnsepCurves(RenderPhrase phrase, float[] samples) {
             bool needBreath = HasNonDefaultCurve(phrase.breathiness, 0, 0.5f);
             bool needTension = HasNonDefaultCurve(phrase.tension, 0, 0.5f);

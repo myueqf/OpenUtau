@@ -38,6 +38,7 @@ namespace OpenUtau.Core.HiFiUtau {
             "brel",
             "breh",
             "bri",
+            "gwl",
         };
 
         public USingerType SingerType => USingerType.Classic;
@@ -116,12 +117,14 @@ namespace OpenUtau.Core.HiFiUtau {
                             var brelCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "brel")?.Item2;
                             var brehCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "breh")?.Item2;
                             var briCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "bri")?.Item2;
+                            var growlCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "gwl")?.Item2;
                             bool needBreath = AudioPostProcessor.HasNonDefaultCurve(phrase.breathiness, 0, 0.5f);
                             bool needTension = AudioPostProcessor.HasNonDefaultCurve(phrase.tension, 0, 0.5f);
                             bool needVoicing = AudioPostProcessor.HasNonDefaultCurve(phrase.voicing, 100, 0.5f);
                             bool needBrel = AudioPostProcessor.HasNonDefaultCurve(brelCurve, 0, 0.5f);
                             bool needBreh = AudioPostProcessor.HasNonDefaultCurve(brehCurve, 0, 0.5f);
                             bool needBri = AudioPostProcessor.HasNonDefaultCurve(briCurve, 0, 0.5f);
+                            bool needGrowl = AudioPostProcessor.HasNonDefaultCurve(growlCurve, 0, 0.5f);
                             if (needBreath || needTension || needVoicing || needBrel || needBreh || needBri) {
                                 float[] harmonic, noise;
                                 if (File.Exists(hnsepHarmonicPath) && File.Exists(hnsepNoisePath)) {
@@ -139,6 +142,10 @@ namespace OpenUtau.Core.HiFiUtau {
                                 AudioPostProcessor.Apply(phrase, result);
                             }
                             Renderers.ApplyDynamics(phrase, result);
+                            if (needGrowl) {
+                                var pitchHzCurve = AudioPostProcessingDsp.PitchHzCurve(phrase, result.samples.Length);
+                                AudioPostProcessor.ApplyGrowl(result.samples, growlCurve, AudioPostProcessingDsp.SampleRate, pitchHzCurve);
+                            }
                             WriteCacheWave(finalWavPath, result.samples);
                         }
                     }
@@ -157,6 +164,7 @@ namespace OpenUtau.Core.HiFiUtau {
                 WriteCurve(writer, phrase.pitches);
                 WriteCurve(writer, phrase.gender);
                 WriteCurve(writer, phrase.toneShift);
+                WriteCurve(writer, phrase.curves.FirstOrDefault(c => c.Item1 == "gwl")?.Item2);
                 foreach (var phone in phrase.phones) {
                     writer.Write(phone.toneShift);
                 }
@@ -478,6 +486,15 @@ namespace OpenUtau.Core.HiFiUtau {
                     abbr = "bri",
                     type = UExpressionType.Curve,
                     min = -100,
+                    max = 100,
+                    defaultValue = 0,
+                    isFlag = false,
+                },
+                new UExpressionDescriptor {
+                    name = "growl (curve)",
+                    abbr = "gwl",
+                    type = UExpressionType.Curve,
+                    min = 0,
                     max = 100,
                     defaultValue = 0,
                     isFlag = false,
