@@ -71,28 +71,36 @@ namespace OpenUtau.Core.HiFiUtau {
                     }
 
                     var model = GetModel(modelPath);
-                    var wavPath = Path.Join(PathManager.Inst.CachePath, $"hifiutau-raw-{model.Hash:x16}-{phrase.hash:x16}.wav");
-                    phrase.AddCacheFile(wavPath);
+                    var finalWavPath = Path.Join(PathManager.Inst.CachePath, $"hifiutau-{model.Hash:x16}-{phrase.hash:x16}.wav");
+                    var rawWavPath = Path.Join(PathManager.Inst.CachePath, $"hifiutau-raw-{model.Hash:x16}-{phrase.hash:x16}.wav");
+                    phrase.AddCacheFile(finalWavPath);
+                    phrase.AddCacheFile(rawWavPath);
 
-                    if (File.Exists(wavPath)) {
-                        using var waveStream = Wave.OpenFile(wavPath);
+                    if (File.Exists(finalWavPath)) {
+                        using var waveStream = Wave.OpenFile(finalWavPath);
                         result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
                     }
                     if (result.samples == null) {
-                        var phones = HiFiUtauPhone.CreateAll(phrase);
-                        result.samples = RenderFeaturePipeline(phones, phrase, model, cancellation.Token);
-                        if (cancellation.IsCancellationRequested) {
-                            return result;
+                        if (File.Exists(rawWavPath)) {
+                            using var waveStream = Wave.OpenFile(rawWavPath);
+                            result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
                         }
-                        HiFiUtauMath.ApplyPhraseEdgeEnvelope(phones, result.samples, HiFiUtauConfig.OutputSampleRate);
-                        WriteCacheWave(wavPath, result.samples);
+                        if (result.samples == null) {
+                            var phones = HiFiUtauPhone.CreateAll(phrase);
+                            result.samples = RenderFeaturePipeline(phones, phrase, model, cancellation.Token);
+                            if (cancellation.IsCancellationRequested) {
+                                return result;
+                            }
+                            HiFiUtauMath.ApplyPhraseEdgeEnvelope(phones, result.samples, HiFiUtauConfig.OutputSampleRate);
+                            WriteCacheWave(rawWavPath, result.samples);
+                        }
+                        if (result.samples != null) {
+                            AudioPostProcessor.Apply(phrase, result);
+                            Renderers.ApplyDynamics(phrase, result);
+                            WriteCacheWave(finalWavPath, result.samples);
+                        }
                     }
-
                     progress.Complete(phrase.phones.Length, progressInfo);
-                    if (result.samples != null) {
-                        AudioPostProcessor.Apply(phrase, result);
-                        Renderers.ApplyDynamics(phrase, result);
-                    }
                     return result;
                 } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
                     return result;
