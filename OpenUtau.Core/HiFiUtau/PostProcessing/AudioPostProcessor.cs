@@ -23,6 +23,13 @@ namespace OpenUtau.Core.HiFiUtau {
             ApplyHnsepCurves(phrase, result.samples);
         }
 
+        public static void ApplyWithSeparated(RenderPhrase phrase, RenderResult result, float[] harmonic, float[] noise) {
+            if (result.samples == null || result.samples.Length == 0) {
+                return;
+            }
+            ApplyHnsepCurvesWithSeparated(phrase, result.samples, harmonic, noise);
+        }
+
         static void ApplyHnsepCurves(RenderPhrase phrase, float[] samples) {
             bool needBreath = HasNonDefaultCurve(phrase.breathiness, 0, 0.5f);
             bool needTension = HasNonDefaultCurve(phrase.tension, 0, 0.5f);
@@ -39,6 +46,27 @@ namespace OpenUtau.Core.HiFiUtau {
                 return;
             }
 
+            ApplyCurvesToComponents(phrase, samples, harmonic, noise, needBreath, needTension, needVoicing, length);
+        }
+
+        static void ApplyHnsepCurvesWithSeparated(RenderPhrase phrase, float[] samples, float[] harmonic, float[] noise) {
+            bool needBreath = HasNonDefaultCurve(phrase.breathiness, 0, 0.5f);
+            bool needTension = HasNonDefaultCurve(phrase.tension, 0, 0.5f);
+            bool needVoicing = HasNonDefaultCurve(phrase.voicing, 100, 0.5f);
+            if (!needBreath && !needTension && !needVoicing) {
+                return;
+            }
+
+            int length = Math.Min(samples.Length, Math.Min(harmonic.Length, noise.Length));
+            if (length <= 0) {
+                return;
+            }
+
+            ApplyCurvesToComponents(phrase, samples, harmonic, noise, needBreath, needTension, needVoicing, length);
+        }
+
+        static void ApplyCurvesToComponents(RenderPhrase phrase, float[] samples, float[] harmonic, float[] noise,
+            bool needBreath, bool needTension, bool needVoicing, int length) {
             if (needBreath) {
                 ApplyBreath(noise, phrase.breathiness, length);
             }
@@ -53,7 +81,7 @@ namespace OpenUtau.Core.HiFiUtau {
             MixComponents(samples, harmonic, noise, length);
         }
 
-        static HnsepSeparator GetSeparator() {
+        public static HnsepSeparator GetSeparator() {
             if (!HnsepSeparator.TryResolveModelPath(out var modelPath)) {
                 throw Error(
                     "HN-SEP model is required for HiFiUTAU BREC/TENC/VOIC.",
@@ -81,7 +109,7 @@ namespace OpenUtau.Core.HiFiUtau {
             return new MessageCustomizableException(message, message, e, showStackTrace);
         }
 
-        static bool HasNonDefaultCurve(float[]? curve, float defaultValue, float tolerance) {
+        public static bool HasNonDefaultCurve(float[]? curve, float defaultValue, float tolerance) {
             return curve != null && curve.Any(value => Math.Abs(value - defaultValue) > tolerance);
         }
 

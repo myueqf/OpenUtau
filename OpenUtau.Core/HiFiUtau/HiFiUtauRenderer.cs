@@ -72,20 +72,32 @@ namespace OpenUtau.Core.HiFiUtau {
                     }
 
                     var model = GetModel(modelPath);
-                    var finalWavPath = Path.Join(PathManager.Inst.CachePath, $"hifiutau-{model.Hash:x16}-{phrase.hash:x16}.wav");
+
+                    // New cache directory structure
+                    var cacheDir = Path.Join(PathManager.Inst.CachePath, "hifiutau");
+                    var rawDir = Path.Join(cacheDir, "raw");
+                    var hnsepDir = Path.Join(cacheDir, "hnsep");
+                    var finalDir = Path.Join(cacheDir, "final");
+                    Directory.CreateDirectory(rawDir);
+                    Directory.CreateDirectory(hnsepDir);
+                    Directory.CreateDirectory(finalDir);
+
                     var rawHash = ComputeRawHash(phrase);
-                    var rawWavPath = Path.Join(PathManager.Inst.CachePath, $"hifiutau-raw-{model.Hash:x16}-{rawHash:x16}.wav");
+                    var rawWavPath = Path.Join(rawDir, $"{model.Hash:x16}-{rawHash:x16}.wav");
+                    var finalWavPath = Path.Join(finalDir, $"{model.Hash:x16}-{phrase.hash:x16}.wav");
+                    var hnsepHarmonicPath = Path.Join(hnsepDir, $"harmonic-{model.Hash:x16}-{rawHash:x16}.wav");
+                    var hnsepNoisePath = Path.Join(hnsepDir, $"noise-{model.Hash:x16}-{rawHash:x16}.wav");
                     phrase.AddCacheFile(finalWavPath);
                     phrase.AddCacheFile(rawWavPath);
+                    phrase.AddCacheFile(hnsepHarmonicPath);
+                    phrase.AddCacheFile(hnsepNoisePath);
 
                     if (File.Exists(finalWavPath)) {
-                        using var waveStream = Wave.OpenFile(finalWavPath);
-                        result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
+                        result.samples = LoadCacheWave(finalWavPath);
                     }
                     if (result.samples == null) {
                         if (File.Exists(rawWavPath)) {
-                            using var waveStream = Wave.OpenFile(rawWavPath);
-                            result.samples = Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
+                            result.samples = LoadCacheWave(rawWavPath);
                         }
                         if (result.samples == null) {
                             var phones = HiFiUtauPhone.CreateAll(phrase);
@@ -97,7 +109,25 @@ namespace OpenUtau.Core.HiFiUtau {
                             WriteCacheWave(rawWavPath, result.samples);
                         }
                         if (result.samples != null) {
-                            AudioPostProcessor.Apply(phrase, result);
+                            // HN-SEP processing with caching
+                            bool needBreath = AudioPostProcessor.HasNonDefaultCurve(phrase.breathiness, 0, 0.5f);
+                            bool needTension = AudioPostProcessor.HasNonDefaultCurve(phrase.tension, 0, 0.5f);
+                            bool needVoicing = AudioPostProcessor.HasNonDefaultCurve(phrase.voicing, 100, 0.5f);
+                            if (needBreath || needTension || needVoicing) {
+                                float[] harmonic, noise;
+                                if (File.Exists(hnsepHarmonicPath) && File.Exists(hnsepNoisePath)) {
+                                    harmonic = LoadCacheWave(hnsepHarmonicPath);
+                                    noise = LoadCacheWave(hnsepNoisePath);
+                                } else {
+                                    var hnsep = AudioPostProcessor.GetSeparator();
+                                    (harmonic, noise) = hnsep.Separate(result.samples);
+                                    WriteCacheWave(hnsepHarmonicPath, harmonic);
+                                    WriteCacheWave(hnsepNoisePath, noise);
+                                }
+                                AudioPostProcessor.ApplyWithSeparated(phrase, result, harmonic, noise);
+                            } else {
+                                AudioPostProcessor.Apply(phrase, result);
+                            }
                             Renderers.ApplyDynamics(phrase, result);
                             WriteCacheWave(finalWavPath, result.samples);
                         }
@@ -188,6 +218,11 @@ namespace OpenUtau.Core.HiFiUtau {
             var source = new WaveSource(0, 0, 0, 1);
             source.SetSamples(samples);
             WaveFileWriter.CreateWaveFile16(path, new ExportAdapter(source).ToMono(1, 0));
+        }
+
+        static float[] LoadCacheWave(string path) {
+            using var waveStream = Wave.OpenFile(path);
+            return Wave.GetSamples(waveStream.ToSampleProvider().ToMono(1, 0));
         }
 
         float[] RenderFeaturePipeline(
