@@ -26,8 +26,9 @@ namespace OpenUtau.Core.HiFiUtau {
             Format.Ustx.CLR,
             Format.Ustx.VEL,
             Format.Ustx.VOL,
-            Format.Ustx.MOD,
-            Format.Ustx.SHFT,
+            Format.Ustx.ATK,
+            Format.Ustx.DEC,
+            Format.Ustx.MODP,
             Format.Ustx.GENC,
             Format.Ustx.BREC,
             Format.Ustx.TENC,
@@ -37,8 +38,8 @@ namespace OpenUtau.Core.HiFiUtau {
             "stm",
             "brel",
             "breh",
-            "bri",
-            "gwl",
+            "bric",
+            "gwlc",
         };
 
         public USingerType SingerType => USingerType.Classic;
@@ -116,8 +117,8 @@ namespace OpenUtau.Core.HiFiUtau {
                             // HN-SEP processing with caching
                             var brelCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "brel")?.Item2;
                             var brehCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "breh")?.Item2;
-                            var briCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "bri")?.Item2;
-                            var growlCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "gwl")?.Item2;
+                            var briCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "bric")?.Item2;
+                            var growlCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "gwlc")?.Item2;
                             bool needBreath = AudioPostProcessor.HasNonDefaultCurve(phrase.breathiness, 0, 0.5f);
                             bool needTension = AudioPostProcessor.HasNonDefaultCurve(phrase.tension, 0, 0.5f);
                             bool needVoicing = AudioPostProcessor.HasNonDefaultCurve(phrase.voicing, 100, 0.5f);
@@ -164,7 +165,7 @@ namespace OpenUtau.Core.HiFiUtau {
                 WriteCurve(writer, phrase.pitches);
                 WriteCurve(writer, phrase.gender);
                 WriteCurve(writer, phrase.toneShift);
-                WriteCurve(writer, phrase.curves.FirstOrDefault(c => c.Item1 == "gwl")?.Item2);
+                WriteCurve(writer, phrase.curves.FirstOrDefault(c => c.Item1 == "gwlc")?.Item2);
                 foreach (var phone in phrase.phones) {
                     writer.Write(phone.toneShift);
                 }
@@ -463,6 +464,7 @@ namespace OpenUtau.Core.HiFiUtau {
             return new[] {
                 new UExpressionDescriptor("phoneme type", "phtp", true, new[] { "normal", "follow next", "follow previous" }),
                 new UExpressionDescriptor("stretch mode", "stm", true, new[] { "none", "loop" }),
+                new UExpressionDescriptor("modulation plus", Format.Ustx.MODP, 0, 100, 0),
                 new UExpressionDescriptor {
                     name = "breath low (curve)",
                     abbr = "brel",
@@ -483,7 +485,7 @@ namespace OpenUtau.Core.HiFiUtau {
                 },
                 new UExpressionDescriptor {
                     name = "brightness (curve)",
-                    abbr = "bri",
+                    abbr = "bric",
                     type = UExpressionType.Curve,
                     min = -100,
                     max = 100,
@@ -492,7 +494,7 @@ namespace OpenUtau.Core.HiFiUtau {
                 },
                 new UExpressionDescriptor {
                     name = "growl (curve)",
-                    abbr = "gwl",
+                    abbr = "gwlc",
                     type = UExpressionType.Curve,
                     min = 0,
                     max = 100,
