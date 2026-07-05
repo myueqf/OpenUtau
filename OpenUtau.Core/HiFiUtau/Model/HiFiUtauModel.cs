@@ -29,9 +29,9 @@ namespace OpenUtau.Core.HiFiUtau {
             var configPath = Path.Combine(location, "config.json");
             if (!File.Exists(part1Path) || !File.Exists(part2Path) || !File.Exists(configPath)) {
                 throw new MessageCustomizableException(
-                    $"Invalid HiFiUTAU model folder \"{location}\"",
-                    $"Invalid HiFiUTAU model folder: {location}",
-                    new FileNotFoundException("HiFiUTAU model folder must contain part1.onnx, part2.onnx and config.json."));
+                    $"Invalid HiFiUTAU model folder \"{location}\". HiFiUTAU model folder must contain part1.onnx, part2.onnx and config.json. Please download from: https://github.com/xiaobaijunya/HIFIUTAU_model/releases",
+                    $"Invalid HiFiUTAU model folder: {location}. Please download from: https://github.com/xiaobaijunya/HIFIUTAU_model/releases",
+                    new FileNotFoundException("HiFiUTAU model folder must contain part1.onnx, part2.onnx and config.json. Please download from: https://github.com/xiaobaijunya/HIFIUTAU_model/releases"));
             }
 
             Config = HiFiUtauConfig.Load(configPath);

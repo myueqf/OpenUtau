@@ -67,8 +67,8 @@ namespace OpenUtau.Core.HiFiUtau {
                     var modelPath = ResolveModelPath(Renderers.HIFIUTAU_DEFAULT_MODEL);
                     if (string.IsNullOrEmpty(modelPath)) {
                         throw new MessageCustomizableException(
-                            "HiFiUTAU model package or folder is not set.",
-                            "HiFiUTAU model package or folder is not set.",
+                            "HiFiUTAU model package or folder is not set. Please download from: https://github.com/xiaobaijunya/HIFIUTAU_model/releases",
+                            "HiFiUTAU model package or folder is not set. Please download from: https://github.com/xiaobaijunya/HIFIUTAU_model/releases",
                             new Exception("HiFiUTAU model package or folder is not set."));
                     }
 

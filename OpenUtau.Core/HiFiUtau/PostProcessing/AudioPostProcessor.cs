@@ -158,8 +158,8 @@ namespace OpenUtau.Core.HiFiUtau {
         public static HnsepSeparator GetSeparator() {
             if (!HnsepSeparator.TryResolveModelPath(out var modelPath)) {
                 throw Error(
-                    "HN-SEP model is required for HiFiUTAU BREC/TENC/VOIC.",
-                    new FileNotFoundException("HN-SEP model package hnsep_VR_44.1k_hop512_240512 is not installed."),
+                    "HN-SEP model is required for HiFiUTAU BREC/TENC/VOIC. Please download from: https://github.com/xiaobaijunya/HIFIUTAU_model/releases",
+                    new FileNotFoundException("HN-SEP model package hnsep_VR_44.1k_hop512_240512 is not installed. Please download from: https://github.com/xiaobaijunya/HIFIUTAU_model/releases"),
                     false);
             }
             lock (separatorLock) {

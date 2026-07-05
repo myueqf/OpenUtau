@@ -8,7 +8,7 @@ using OpenUtau.Core.Util;
 
 namespace OpenUtau.Core.HiFiUtau {
     class HnsepSeparator {
-        const string HnsepVrPackage = "hnsep_VR_44.1k_hop512_240512";
+        const string HnsepVrPackage = "hnsep_onnx_240512";
 
         readonly InferenceSession session;
         readonly object sessionLock = new object();
