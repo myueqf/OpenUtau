@@ -115,18 +115,8 @@ namespace OpenUtau.Core.HiFiUtau {
                         }
                         if (result.samples != null) {
                             // HN-SEP processing with caching
-                            var brelCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "brel")?.Item2;
-                            var brehCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "breh")?.Item2;
-                            var briCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "bric")?.Item2;
-                            var growlCurve = phrase.curves.FirstOrDefault(c => c.Item1 == "gwlc")?.Item2;
-                            bool needBreath = AudioPostProcessor.HasNonDefaultCurve(phrase.breathiness, 0, 0.5f);
-                            bool needTension = AudioPostProcessor.HasNonDefaultCurve(phrase.tension, 0, 0.5f);
-                            bool needVoicing = AudioPostProcessor.HasNonDefaultCurve(phrase.voicing, 100, 0.5f);
-                            bool needBrel = AudioPostProcessor.HasNonDefaultCurve(brelCurve, 0, 0.5f);
-                            bool needBreh = AudioPostProcessor.HasNonDefaultCurve(brehCurve, 0, 0.5f);
-                            bool needBri = AudioPostProcessor.HasNonDefaultCurve(briCurve, 0, 0.5f);
-                            bool needGrowl = AudioPostProcessor.HasNonDefaultCurve(growlCurve, 0, 0.5f);
-                            if (needBreath || needTension || needVoicing || needBrel || needBreh || needBri) {
+                            var postCurves = PostProcessCurves.FromPhrase(phrase);
+                            if (postCurves.NeedsHnsep) {
                                 float[] harmonic, noise;
                                 if (File.Exists(hnsepHarmonicPath) && File.Exists(hnsepNoisePath)) {
                                     harmonic = LoadCacheWave(hnsepHarmonicPath);
@@ -138,14 +128,14 @@ namespace OpenUtau.Core.HiFiUtau {
                                     WriteCacheWave(hnsepNoisePath, noise);
                                 }
                                 AudioPostProcessor.ApplyWithSeparated(phrase, result, harmonic, noise,
-                                    brelCurve, brehCurve, briCurve);
+                                    postCurves.Brel, postCurves.Breh, postCurves.Bri);
                             } else {
                                 AudioPostProcessor.Apply(phrase, result);
                             }
                             Renderers.ApplyDynamics(phrase, result);
-                            if (needGrowl) {
+                            if (postCurves.NeedsGrowl) {
                                 var pitchHzCurve = AudioPostProcessingDsp.PitchHzCurve(phrase, result.samples.Length);
-                                AudioPostProcessor.ApplyGrowl(result.samples, growlCurve, AudioPostProcessingDsp.SampleRate, pitchHzCurve);
+                                AudioPostProcessor.ApplyGrowl(result.samples, postCurves.Growl, AudioPostProcessingDsp.SampleRate, pitchHzCurve);
                             }
                             WriteCacheWave(finalWavPath, result.samples);
                         }
@@ -165,12 +155,16 @@ namespace OpenUtau.Core.HiFiUtau {
                 WriteCurve(writer, phrase.pitches);
                 WriteCurve(writer, phrase.gender);
                 WriteCurve(writer, phrase.toneShift);
-                WriteCurve(writer, phrase.curves.FirstOrDefault(c => c.Item1 == "gwlc")?.Item2);
+                WriteCurve(writer, GetCurve(phrase, "gwlc"));
                 foreach (var phone in phrase.phones) {
                     writer.Write(phone.toneShift);
                 }
             }
             return XXH64.DigestOf(stream.ToArray());
+        }
+
+        static float[]? GetCurve(RenderPhrase phrase, string abbr) {
+            return phrase.curves.FirstOrDefault(c => c.Item1 == abbr)?.Item2;
         }
 
         static void WriteCurve(BinaryWriter writer, float[]? curve) {
@@ -505,5 +499,39 @@ namespace OpenUtau.Core.HiFiUtau {
         }
 
         public override string ToString() => Renderers.HIFIUTAU;
+
+        readonly struct PostProcessCurves {
+            PostProcessCurves(float[]? brel, float[]? breh, float[]? bri, float[]? growl, bool needsHnsep, bool needsGrowl) {
+                Brel = brel;
+                Breh = breh;
+                Bri = bri;
+                Growl = growl;
+                NeedsHnsep = needsHnsep;
+                NeedsGrowl = needsGrowl;
+            }
+
+            public readonly float[]? Brel;
+            public readonly float[]? Breh;
+            public readonly float[]? Bri;
+            public readonly float[]? Growl;
+            public readonly bool NeedsHnsep;
+            public readonly bool NeedsGrowl;
+
+            public static PostProcessCurves FromPhrase(RenderPhrase phrase) {
+                var brel = GetCurve(phrase, "brel");
+                var breh = GetCurve(phrase, "breh");
+                var bri = GetCurve(phrase, "bric");
+                var growl = GetCurve(phrase, "gwlc");
+                bool needsHnsep =
+                    AudioPostProcessor.HasNonDefaultCurve(phrase.breathiness, 0, 0.5f) ||
+                    AudioPostProcessor.HasNonDefaultCurve(phrase.tension, 0, 0.5f) ||
+                    AudioPostProcessor.HasNonDefaultCurve(phrase.voicing, 100, 0.5f) ||
+                    AudioPostProcessor.HasNonDefaultCurve(brel, 0, 0.5f) ||
+                    AudioPostProcessor.HasNonDefaultCurve(breh, 0, 0.5f) ||
+                    AudioPostProcessor.HasNonDefaultCurve(bri, 0, 0.5f);
+                bool needsGrowl = AudioPostProcessor.HasNonDefaultCurve(growl, 0, 0.5f);
+                return new PostProcessCurves(brel, breh, bri, growl, needsHnsep, needsGrowl);
+            }
+        }
     }
 }

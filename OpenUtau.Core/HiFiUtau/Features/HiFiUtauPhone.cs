@@ -63,26 +63,21 @@ namespace OpenUtau.Core.HiFiUtau {
         /// so GetFlag always returns 0 (Item2 is null).
         /// </summary>
         static int ParsePhtpFlag(RenderPhone phone) {
-            var flag = phone.flags.FirstOrDefault(f => f.Item1 == "phtp" || f.Item3 == "phtp");
-            if (flag == null) {
-                return 0;
-            }
-            return flag.Item1 switch {
-                "follow next" => 1,
-                "follow previous" => 2,
-                _ => 0,
-            };
+            return ParseOptionFlag(phone, "phtp",
+                ("follow next", 1),
+                ("follow previous", 2));
         }
 
         static int ParseStmFlag(RenderPhone phone) {
-            var flag = phone.flags.FirstOrDefault(f => f.Item1 == "stm" || f.Item3 == "stm");
+            return ParseOptionFlag(phone, "stm", ("loop", 1));
+        }
+
+        static int ParseOptionFlag(RenderPhone phone, string abbr, params (string option, int value)[] options) {
+            var flag = phone.flags.FirstOrDefault(f => f.Item1 == abbr || f.Item3 == abbr);
             if (flag == null) {
                 return 0;
             }
-            return flag.Item1 switch {
-                "loop" => 1,
-                _ => 0,
-            };
+            return options.FirstOrDefault(option => option.option == flag.Item1).value;
         }
     }
 }

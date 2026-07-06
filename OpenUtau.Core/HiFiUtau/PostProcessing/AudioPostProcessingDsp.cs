@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Linq;
 using System.Numerics;
 using NWaves.Transforms;
 using OpenUtau.Core.Render;
@@ -10,23 +9,11 @@ namespace OpenUtau.Core.HiFiUtau {
         public const int SampleRate = 44100;
 
         public static float[] HannWindow(int size) {
-            return Enumerable.Range(0, size)
-                .Select(i => (float)(0.5 - 0.5 * Math.Cos(2 * Math.PI * i / (size - 1))))
-                .ToArray();
+            return HiFiUtauMath.HannWindow(size);
         }
 
         public static int ReflectIndex(int i, int length) {
-            if (length <= 1) {
-                return 0;
-            }
-            while (i < 0 || i >= length) {
-                if (i < 0) {
-                    i = -i;
-                } else {
-                    i = 2 * length - i - 2;
-                }
-            }
-            return i;
+            return HiFiUtauMath.ReflectIndex(i, length);
         }
 
         public static float CurveValue(float[]? curve, int index, float defaultValue) {

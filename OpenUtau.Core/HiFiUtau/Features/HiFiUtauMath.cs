@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Numerics;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
@@ -19,6 +20,12 @@ namespace OpenUtau.Core.HiFiUtau {
 
         public static double StretchFactor(double velocity) {
             return Math.Pow(2.0, (100.0 - velocity) / 100.0);
+        }
+
+        public static float[] HannWindow(int size) {
+            return Enumerable.Range(0, size)
+                .Select(i => (float)(0.5 - 0.5 * Math.Cos(2 * Math.PI * i / (size - 1))))
+                .ToArray();
         }
 
         public static float[] ReadMonoSamples(string path, int sampleRate) {
