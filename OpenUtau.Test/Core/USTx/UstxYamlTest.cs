@@ -1,4 +1,5 @@
-﻿using Xunit;
+﻿using OpenUtau.Core.Util;
+using Xunit;
 using Xunit.Abstractions;
 
 namespace OpenUtau.Core.Ustx {
@@ -62,6 +63,34 @@ phoneme_overrides: []
             Assert.NotNull(vel);
             Assert.Null(vel.descriptor);
             Assert.Equal(123, vel.value);
+        }
+
+        [Fact]
+        public void VibratoToggleRestoresPreviousLength() {
+            var vibrato = new UVibrato { length = 42 };
+
+            vibrato.length = vibrato.GetToggleLength();
+            Assert.Equal(0, vibrato.length);
+
+            vibrato.length = vibrato.GetToggleLength();
+            Assert.Equal(42, vibrato.length);
+        }
+
+        [Fact]
+        public void DisabledVibratoCloneRemembersPreviousLength() {
+            var vibrato = new UVibrato { length = 42 };
+            vibrato.length = vibrato.GetToggleLength();
+
+            var clone = vibrato.Clone();
+
+            Assert.Equal(42, clone.GetToggleLength());
+        }
+
+        [Fact]
+        public void NewDisabledVibratoUsesDefaultLength() {
+            var vibrato = new UVibrato();
+
+            Assert.Equal(NotePresets.Default.DefaultVibrato.VibratoLength, vibrato.GetToggleLength());
         }
 
         [Fact]

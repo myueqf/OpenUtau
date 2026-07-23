@@ -664,8 +664,9 @@ namespace OpenUtau.App.ViewModels {
                                 DocManager.Inst.ExecuteCmd(new VibratoLengthCommand(Part, note, 0));
                             }
                         } else {
-                            if (note.vibrato.length != NotePresets.Default.DefaultVibrato.VibratoLength) {
-                                DocManager.Inst.ExecuteCmd(new VibratoLengthCommand(Part, note, NotePresets.Default.DefaultVibrato.VibratoLength));
+                            float length = note.vibrato.GetToggleLength();
+                            if (note.vibrato.length != length) {
+                                DocManager.Inst.ExecuteCmd(new VibratoLengthCommand(Part, note, length));
                             }
                         }
                     }

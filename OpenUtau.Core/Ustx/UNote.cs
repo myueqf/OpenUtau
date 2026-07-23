@@ -287,6 +287,8 @@ namespace OpenUtau.Core.Ustx {
     public class UVibrato {
         // Vibrato percentage of note length.
         float _length;
+        // Last non-zero vibrato length in the current editing session.
+        float? _lastLength;
         // Period in milliseconds.
         float _period = NotePresets.Default.DefaultVibrato.VibratoPeriod;
         // Depth in cents (1 semitone = 100 cents).
@@ -302,7 +304,15 @@ namespace OpenUtau.Core.Ustx {
         // Percentage of volume reduction in linkage with vibrato. When this is 100%, volume will be 1.2 times to 0.2 times regardless of depth.
         float _volLink = NotePresets.Default.DefaultVibrato.VibratoVolLink;
 
-        public float length { get => _length; set => _length = Math.Max(0, Math.Min(100, value)); }
+        public float length {
+            get => _length;
+            set {
+                _length = Math.Max(0, Math.Min(100, value));
+                if (_length > 0) {
+                    _lastLength = _length;
+                }
+            }
+        }
         public float period { get => _period; set => _period = Math.Max(5, Math.Min(500, value)); }
         public float depth { get => _depth; set => _depth = Math.Max(5, Math.Min(200, value)); }
 
@@ -327,6 +337,12 @@ namespace OpenUtau.Core.Ustx {
 
         [YamlIgnore] public float NormalizedStart => 1f - length / 100f;
 
+        public float GetToggleLength() {
+            return length == 0
+                ? _lastLength ?? NotePresets.Default.DefaultVibrato.VibratoLength
+                : 0;
+        }
+
         public UVibrato Clone() {
             var result = new UVibrato {
                 length = length,
@@ -338,6 +354,7 @@ namespace OpenUtau.Core.Ustx {
                 drift = drift,
                 volLink = volLink
             };
+            result._lastLength = _lastLength;
             return result;
         }
 

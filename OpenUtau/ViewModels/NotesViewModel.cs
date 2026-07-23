@@ -961,7 +961,7 @@ namespace OpenUtau.App.ViewModels {
             }
             var vibrato = note.vibrato;
             DocManager.Inst.StartUndoGroup("command.vibrato.edit");
-            DocManager.Inst.ExecuteCmd(new VibratoLengthCommand(Part, note, vibrato.length == 0 ? NotePresets.Default.DefaultVibrato.VibratoLength : 0));
+            DocManager.Inst.ExecuteCmd(new VibratoLengthCommand(Part, note, vibrato.GetToggleLength()));
             DocManager.Inst.EndUndoGroup();
         }
 
