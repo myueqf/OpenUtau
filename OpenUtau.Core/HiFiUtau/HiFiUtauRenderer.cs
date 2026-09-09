@@ -173,6 +173,13 @@ namespace OpenUtau.Core.HiFiUtau {
                         }
                     }
                     progress.Complete(phrase.phones.Length, progressInfo);
+                    if (result.samples != null) {
+                        PlaybackManager.Inst.LiveWaveformCache[phrase.hash.ToString()] = (
+                            trackNo, phrase.positionMs - phrase.leadingMs, result.samples, DateTime.Now);
+                        Task.Factory.StartNew(() => {
+                            DocManager.Inst.ExecuteCmd(new WaveformReadyNotification());
+                        }, CancellationToken.None, TaskCreationOptions.None, DocManager.Inst.MainScheduler);
+                    }
                     return result;
                 } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
                     return result;
