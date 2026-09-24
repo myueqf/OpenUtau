@@ -19,6 +19,8 @@ namespace OpenUtau.Core.HiFiUtau {
         const int DynamicInterval = 5;
         static readonly Dictionary<string, HiFiUtauModel> models = new Dictionary<string, HiFiUtauModel>();
         static readonly object modelsLock = new object();
+        static readonly SemaphoreSlim[] cacheLocks = Enumerable.Range(0, 64)
+            .Select(_ => new SemaphoreSlim(1, 1)).ToArray();
 
         static readonly HashSet<string> supportedExp = new HashSet<string>() {
             Format.Ustx.DYN,
@@ -63,7 +65,13 @@ namespace OpenUtau.Core.HiFiUtau {
         }
 
         public Task<RenderResult> Render(RenderPhrase phrase, Progress progress, int trackNo, CancellationTokenSource cancellation, bool isPreRender = false, RenderPhraseEvents? renderEvents = null) {
-            return Task.Run(() => {
+            CancellationToken token;
+            try {
+                token = cancellation.Token;
+            } catch (ObjectDisposedException) {
+                token = new CancellationToken(canceled: true);
+            }
+            return Task.Run(async () => {
                 var result = Layout(phrase);
                 try {
                     string progressInfo = $"Track {trackNo + 1}: {this} \"{string.Join(" ", phrase.phones.Select(p => p.phoneme))}\"";
@@ -77,7 +85,7 @@ namespace OpenUtau.Core.HiFiUtau {
                             new Exception("HiFiUTAU model package or folder is not set."));
                     }
 
-                    if (cancellation.IsCancellationRequested) {
+                    if (token.IsCancellationRequested) {
                         return result;
                     }
 
@@ -93,6 +101,7 @@ namespace OpenUtau.Core.HiFiUtau {
                             secondaryPhones[i], SampleCrossSynthesisAt(phrase, phone.PositionMs))).ToArray();
                         AlignPhoneModelFrames(controlPhones, phrase, model.Config);
                     }
+                    var postCurves = PostProcessCurves.FromPhrase(phrase, controlPhones);
 
                     // New cache directory structure
                     var cacheDir = Path.Join(PathManager.Inst.CachePath, "hifiutau");
@@ -103,9 +112,10 @@ namespace OpenUtau.Core.HiFiUtau {
                     Directory.CreateDirectory(hnsepDir);
                     Directory.CreateDirectory(finalDir);
 
-                    var rawHash = ComputeRawHash(phrase);
+                    var rawHash = ComputeRawHash(phrase, phones, secondaryPhones, controlPhones);
+                    var finalHash = ComputeFinalHash(rawHash, controlPhones, postCurves);
                     var rawWavPath = Path.Join(rawDir, $"{model.Hash:x16}-{rawHash:x16}.wav");
-                    var finalWavPath = Path.Join(finalDir, $"{model.Hash:x16}-{rawHash:x16}-{phrase.hash:x16}-classic-direct-v2-hg-growl.wav");
+                    var finalWavPath = Path.Join(finalDir, $"{model.Hash:x16}-{rawHash:x16}-{finalHash:x16}-staged-v2-float32.wav");
                     var hnsepHarmonicPath = Path.Join(hnsepDir, $"harmonic-{model.Hash:x16}-{rawHash:x16}.wav");
                     var hnsepNoisePath = Path.Join(hnsepDir, $"noise-{model.Hash:x16}-{rawHash:x16}.wav");
                     phrase.AddCacheFile(finalWavPath);
@@ -113,68 +123,71 @@ namespace OpenUtau.Core.HiFiUtau {
                     phrase.AddCacheFile(hnsepHarmonicPath);
                     phrase.AddCacheFile(hnsepNoisePath);
 
-                    if (File.Exists(finalWavPath)) {
-                        result.samples = LoadCacheWave(finalWavPath);
-                    }
-                    if (result.samples == null) {
-                        if (File.Exists(rawWavPath)) {
-                            result.samples = LoadCacheWave(rawWavPath);
+                    var cacheLock = cacheLocks[(int)((model.Hash ^ rawHash) % (ulong)cacheLocks.Length)];
+                    await cacheLock.WaitAsync(token).ConfigureAwait(false);
+                    try {
+                        if (File.Exists(finalWavPath)) {
+                            result.samples = LoadCacheWave(finalWavPath);
                         }
                         if (result.samples == null) {
-                            result.samples = RenderFeaturePipeline(phones, secondaryPhones, phrase, model, cancellation.Token);
-                            if (cancellation.IsCancellationRequested) {
-                                return result;
+                            if (File.Exists(rawWavPath)) {
+                                result.samples = LoadCacheWave(rawWavPath);
                             }
-                            ApplyPhraseEdges(phones, secondaryPhones, phrase, result.samples);
-                            WriteCacheWave(rawWavPath, result.samples);
-                        }
-                        if (result.samples != null) {
-                            // HN-SEP processing with caching
-                            var postCurves = PostProcessCurves.FromPhrase(phrase, controlPhones);
-                            if (postCurves.NeedsHnsep) {
-                                float[] harmonic, noise;
-                                if (File.Exists(hnsepHarmonicPath) && File.Exists(hnsepNoisePath)) {
-                                    harmonic = LoadCacheWave(hnsepHarmonicPath);
-                                    noise = LoadCacheWave(hnsepNoisePath);
-                                } else {
-                                    var hnsep = AudioPostProcessor.GetSeparator();
-                                    (harmonic, noise) = hnsep.Separate(result.samples);
-                                    WriteCacheWave(hnsepHarmonicPath, harmonic);
-                                    WriteCacheWave(hnsepNoisePath, noise);
+                            if (result.samples == null) {
+                                result.samples = RenderFeaturePipeline(phones, secondaryPhones, phrase, model, token);
+                                token.ThrowIfCancellationRequested();
+                                ApplyPhraseEdges(phones, secondaryPhones, phrase, result.samples);
+                                WriteCacheWave(rawWavPath, result.samples);
+                            }
+                            if (result.samples != null) {
+                                float[]? harmonic = null;
+                                float[]? noise = null;
+                                if (postCurves.NeedsHnsep) {
+                                    if (File.Exists(hnsepHarmonicPath) && File.Exists(hnsepNoisePath)) {
+                                        harmonic = LoadCacheWave(hnsepHarmonicPath);
+                                        noise = LoadCacheWave(hnsepNoisePath);
+                                    } else {
+                                        var hnsep = AudioPostProcessor.GetSeparator();
+                                        (harmonic, noise) = hnsep.Separate(result.samples);
+                                        token.ThrowIfCancellationRequested();
+                                        WriteCacheWave(hnsepHarmonicPath, harmonic);
+                                        WriteCacheWave(hnsepNoisePath, noise);
+                                    }
                                 }
-                                AudioPostProcessor.ApplyWithSeparated(phrase, result, harmonic, noise,
-                                    postCurves.Brel, postCurves.Breh, postCurves.Bri,
-                                    postCurves.Breathiness, postCurves.Tension, postCurves.Voicing);
-                            } else {
-                                AudioPostProcessor.Apply(phrase, result,
-                                    postCurves.Breathiness, postCurves.Tension, postCurves.Voicing);
+                                if (harmonic != null && noise != null) {
+                                    AudioPostProcessor.ApplyWithSeparated(phrase, result, harmonic, noise,
+                                        postCurves.Brel, postCurves.Breh, postCurves.Bri,
+                                        postCurves.Breathiness, postCurves.Tension, postCurves.Voicing);
+                                } else {
+                                    AudioPostProcessor.Apply(phrase, result,
+                                        postCurves.Breathiness, postCurves.Tension, postCurves.Voicing);
+                                }
+                                if (postCurves.NeedsGrowl) {
+                                    AudioPostProcessor.ApplyGrowl(result.samples, postCurves.Growl, AudioPostProcessingDsp.SampleRate);
+                                }
+                                if (postCurves.NeedsDistortion) {
+                                    var pitchHzCurve = AudioPostProcessingDsp.PitchHzCurve(phrase, result.samples.Length);
+                                    AudioPostProcessor.ApplyDistortion(result.samples, postCurves.Distortion, AudioPostProcessingDsp.SampleRate, pitchHzCurve);
+                                }
+                                double samplesPerModelFrame =
+                                    model.Config.ModelHop * (double)HiFiUtauConfig.OutputSampleRate / model.Config.SampleRate;
+                                HiFiUtauLoudnessNormalizer.NormalizePhonesInPlace(
+                                    result.samples,
+                                    controlPhones,
+                                    HiFiUtauConfig.OutputSampleRate,
+                                    samplesPerModelFrame);
+                                ApplyDirectPhones(result.samples, phones, phrase, HiFiUtauConfig.OutputSampleRate);
+                                ApplyPhoneVolumes(result.samples, controlPhones, samplesPerModelFrame);
+                                token.ThrowIfCancellationRequested();
+                                WriteCacheWave(finalWavPath, result.samples);
                             }
-                            if (postCurves.NeedsGrowl) {
-                                AudioPostProcessor.ApplyGrowl(result.samples, postCurves.Growl, AudioPostProcessingDsp.SampleRate);
-                            }
-                            if (postCurves.NeedsDistortion) {
-                                var pitchHzCurve = AudioPostProcessingDsp.PitchHzCurve(phrase, result.samples.Length);
-                                AudioPostProcessor.ApplyDistortion(result.samples, postCurves.Distortion, AudioPostProcessingDsp.SampleRate, pitchHzCurve);
-                            }
-                            double samplesPerModelFrame =
-                                model.Config.ModelHop * (double)HiFiUtauConfig.OutputSampleRate / model.Config.SampleRate;
-                            HiFiUtauLoudnessNormalizer.NormalizePhonesInPlace(
-                                result.samples,
-                                controlPhones,
-                                HiFiUtauConfig.OutputSampleRate,
-                                samplesPerModelFrame);
-                            // Overlay raw samples for direct phonemes. Runs after loudness
-                            // normalization (so the raw recording is not re-leveled) and before
-                            // ApplyPhoneVolumes (so the VOL expression also scales the direct audio).
-                            ApplyDirectPhones(result.samples, phones, phrase, HiFiUtauConfig.OutputSampleRate);
-                            // Apply VOL on the waveform so its percentage remains a linear output ratio.
-                            ApplyPhoneVolumes(
-                                result.samples,
-                                controlPhones,
-                                model.Config.ModelHop * (double)HiFiUtauConfig.OutputSampleRate / model.Config.SampleRate);
-                            Renderers.ApplyDynamics(phrase, result);
-                            WriteCacheWave(finalWavPath, result.samples);
                         }
+                    } finally {
+                        cacheLock.Release();
+                    }
+                    token.ThrowIfCancellationRequested();
+                    if (result.samples != null) {
+                        Renderers.ApplyDynamics(phrase, result);
                     }
                     progress.Complete(phrase.phones.Length, progressInfo);
                     if (result.samples != null) {
@@ -185,26 +198,94 @@ namespace OpenUtau.Core.HiFiUtau {
                         }, CancellationToken.None, TaskCreationOptions.None, DocManager.Inst.MainScheduler);
                     }
                     return result;
-                } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
+                } catch (OperationCanceledException) when (token.IsCancellationRequested) {
                     return result;
                 }
             });
         }
 
-        static ulong ComputeRawHash(RenderPhrase phrase) {
+        static ulong ComputeRawHash(RenderPhrase phrase, HiFiUtauPhone[] phones,
+            HiFiUtauPhone[]? secondaryPhones, HiFiUtauPhone[] controlPhones) {
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream)) {
-                writer.Write("hifiutau-v14-independent-cross-synthesis-timing");
-                writer.Write(phrase.preEffectHash);
+                writer.Write("hifiutau-v16-staged-raw-xsy-distortion-float32");
+                writer.Write(phrase.singer.Id);
+                writer.Write(phrase.timeAxis.Timestamp);
+                writer.Write(phrase.position);
+                writer.Write(phrase.leading);
+                writer.Write(phrase.positionMs);
+                writer.Write(phrase.leadingMs);
+                writer.Write(phrase.durationMs);
                 WriteCurve(writer, phrase.pitches);
                 WriteCurve(writer, phrase.xsy);
                 WriteCurve(writer, phrase.gender);
                 WriteCurveActivity(writer, phrase.genderCurveActive);
                 WriteCurve(writer, phrase.toneShift);
-                WriteCurve(writer, GetCurve(phrase, "gwlc"));
-                foreach (var phone in phrase.phones) {
-                    writer.Write(phone.gender);
-                    writer.Write(phone.toneShift);
+                WritePhoneInputs(writer, phones);
+                writer.Write(secondaryPhones?.Length ?? 0);
+                if (secondaryPhones != null) {
+                    WritePhoneInputs(writer, secondaryPhones);
+                }
+                writer.Write(controlPhones.Length);
+                foreach (var phone in controlPhones) {
+                    foreach (var point in phone.Envelope) {
+                        writer.Write(point.X);
+                        writer.Write(point.Y);
+                    }
+                    writer.Write(phone.ModelStartFrame);
+                    writer.Write(phone.ModelEndFrame);
+                }
+            }
+            return XXH64.DigestOf(stream.ToArray());
+        }
+
+        static void WritePhoneInputs(BinaryWriter writer, HiFiUtauPhone[] phones) {
+            writer.Write(phones.Length);
+            foreach (var phone in phones) {
+                writer.Write(phone.AudioPath);
+                var source = string.IsNullOrEmpty(phone.AudioPath) ? null : new FileInfo(phone.AudioPath);
+                writer.Write(source?.Exists == true ? source.Length : -1L);
+                writer.Write(source?.Exists == true ? source.LastWriteTimeUtc.Ticks : 0L);
+                writer.Write(phone.OffsetMs);
+                writer.Write(phone.ConsonantMs);
+                writer.Write(phone.CutoffMs);
+                writer.Write(phone.PreutterMs);
+                writer.Write(phone.PositionMs);
+                writer.Write(phone.Velocity);
+                writer.Write(phone.GenderValue);
+                writer.Write(phone.ToneShift);
+                writer.Write(phone.PhonemeType);
+                writer.Write(phone.StretchMode);
+                foreach (var point in phone.Envelope) {
+                    writer.Write(point.X);
+                    writer.Write(point.Y);
+                }
+            }
+        }
+
+        static ulong ComputeFinalHash(ulong rawHash, HiFiUtauPhone[] phones, PostProcessCurves curves) {
+            using var stream = new MemoryStream();
+            using (var writer = new BinaryWriter(stream)) {
+                writer.Write(rawHash);
+                writer.Write("post-v1");
+                WriteCurve(writer, curves.Breathiness);
+                WriteCurve(writer, curves.Tension);
+                WriteCurve(writer, curves.Voicing);
+                WriteCurve(writer, curves.Brel);
+                WriteCurve(writer, curves.Breh);
+                WriteCurve(writer, curves.Bri);
+                WriteCurve(writer, curves.Growl);
+                WriteCurve(writer, curves.Distortion);
+                foreach (var phone in phones) {
+                    writer.Write(phone.Normalize);
+                    writer.Write(phone.Volume);
+                    writer.Write(phone.Direct);
+                    writer.Write(phone.OffsetMs);
+                    writer.Write(phone.CutoffMs);
+                    writer.Write(phone.PreutterMs);
+                    writer.Write(phone.LeadingMs);
+                    writer.Write(phone.PositionMs);
+                    writer.Write(phone.Velocity);
                 }
             }
             return XXH64.DigestOf(stream.ToArray());
@@ -367,9 +448,27 @@ namespace OpenUtau.Core.HiFiUtau {
         }
 
         static void WriteCacheWave(string path, float[] samples) {
-            var source = new WaveSource(0, 0, 0, 1);
-            source.SetSamples(samples);
-            WaveFileWriter.CreateWaveFile16(path, new ExportAdapter(source).ToMono(1, 0));
+            var directory = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(directory)) {
+                throw new IOException($"Cache path has no parent directory: {path}");
+            }
+            Directory.CreateDirectory(directory);
+            string temporaryPath = Path.Combine(
+                directory,
+                Path.GetFileName(path) + "." + Guid.NewGuid().ToString("N") + ".tmp");
+            try {
+                using (var writer = new WaveFileWriter(
+                    temporaryPath,
+                    WaveFormat.CreateIeeeFloatWaveFormat(
+                        HiFiUtauConfig.OutputSampleRate, 1))) {
+                    writer.WriteSamples(samples, 0, samples.Length);
+                }
+                File.Move(temporaryPath, path, overwrite: true);
+            } finally {
+                if (File.Exists(temporaryPath)) {
+                    File.Delete(temporaryPath);
+                }
+            }
         }
 
         static float[] LoadCacheWave(string path) {
