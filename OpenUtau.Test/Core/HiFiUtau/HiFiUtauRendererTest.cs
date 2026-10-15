@@ -1,11 +1,66 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Numerics;
+using NAudio.Wave;
 using OpenUtau.Core.Ustx;
 using Xunit;
 
 namespace OpenUtau.Core.HiFiUtau {
     public class HiFiUtauRendererTest {
+        [Theory]
+        [InlineData(100, 0, 0)]
+        [InlineData(50, 0, 0)]
+        [InlineData(100, 25, 0)]
+        [InlineData(50, 25, 0)]
+        [InlineData(100, -20, 0)]
+        [InlineData(50, 0, 1)]
+        [InlineData(50, 25, 1)]
+        [InlineData(100, -20, 1)]
+        public void ExtractFeatureMel_KeepsConsonantOnClassicTimeline(
+                double velocity, double leadingDelta, int stretchMode) {
+            var config = new HiFiUtauConfig();
+            var source = new float[config.SampleRate];
+            const double offsetMs = 100;
+            const double transientMs = 60;
+            source[(int)Math.Round((offsetMs + transientMs) * config.SampleRate / 1000.0)] = 1;
+            var path = Path.Combine(Path.GetTempPath(), $"hifi-timing-{Guid.NewGuid():N}.wav");
+            try {
+                using (var writer = new WaveFileWriter(path,
+                        WaveFormat.CreateIeeeFloatWaveFormat(config.SampleRate, 1))) {
+                    writer.WriteSamples(source, 0, source.Length);
+                }
+                double stretch = Math.Pow(2, (100 - velocity) / 100);
+                // 40.2 ms rounds upward in float. The old negative-skip branch
+                // inserted 12 source frames even without a user timing adjustment.
+                double leadingMs = 40.2 * stretch + leadingDelta;
+                var phone = new HiFiUtauPhone {
+                    AudioPath = path,
+                    OffsetMs = offsetMs,
+                    ConsonantMs = 120,
+                    CutoffMs = -400,
+                    PreutterMs = 40.2,
+                    LeadingMs = leadingMs,
+                    Velocity = velocity,
+                    StretchMode = stretchMode,
+                    Envelope = [new((float)-leadingMs, 0), new(0, 100),
+                        new(0, 100), new(465, 100), new(500, 0)],
+                };
+
+                var mel = HiFiUtauRenderer.ExtractFeatureMel(phone, config,
+                    new HiFiUtauMelExtractor(config), new HiFiUtauLoudnessNormalizer());
+                int peakFrame = Enumerable.Range(0, mel.GetLength(1))
+                    .MaxBy(t => Enumerable.Range(0, mel.GetLength(0)).Sum(b => Math.Exp(mel[b, t])));
+                // Classic places source audio at position - leading - skipOver.
+                double skipOverMs = phone.PreutterMs * stretch - leadingMs;
+                double actualMs = -leadingMs + peakFrame * config.MsPerFeatureFrame;
+                double expectedMs = -leadingMs - skipOverMs + transientMs * stretch;
+                Assert.InRange(Math.Abs(actualMs - expectedMs), 0, 2 * config.MsPerFeatureFrame);
+            } finally {
+                File.Delete(path);
+            }
+        }
+
         [Theory]
         [InlineData(0.0, 0.0)]
         [InlineData(0.5, 0.5)]
