@@ -178,7 +178,7 @@ namespace OpenUtau.Core.HiFiUtau {
         static ulong ComputeRawHash(RenderPhrase phrase) {
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream)) {
-                writer.Write("hifiutau-v15-worldline-r11-source-auto-gain");
+                writer.Write("hifiutau-v16-classic-source-timing");
                 writer.Write(phrase.preEffectHash);
                 WriteCurve(writer, phrase.pitches);
                 WriteCurve(writer, phrase.xsy);
@@ -450,7 +450,7 @@ namespace OpenUtau.Core.HiFiUtau {
             }
         }
 
-        float[,] ExtractFeatureMel(HiFiUtauPhone phone, HiFiUtauConfig config,
+        internal static float[,] ExtractFeatureMel(HiFiUtauPhone phone, HiFiUtauConfig config,
                 HiFiUtauMelExtractor melExtractor, HiFiUtauLoudnessNormalizer normalizer) {
             var audio = HiFiUtauMath.ReadMonoSamples(phone.AudioPath, config.SampleRate);
             double totalLenMs = audio.Length * 1000.0 / config.SampleRate;
@@ -464,23 +464,17 @@ namespace OpenUtau.Core.HiFiUtau {
             }
 
             double stretch = HiFiUtauMath.StretchFactor(phone.Velocity);
-            double preToLeftMs = phone.PreutterMs * stretch + phone.Envelope[0].X;
-            if (preToLeftMs < 0) {
-                // 尽可能保留起点前的真实音频
-                startSample = Math.Max(0, startSample - 12 * config.FeatureHop);
-            }
+            // Match Classic's skipOver. A negative value adds silence before the
+            // oto offset; it must not move the source origin and delay the consonant.
+            // LeadingMs also avoids branching on float-rounded envelope coordinates.
+            double preToLeftMs = phone.PreutterMs * stretch - phone.LeadingMs;
 
-            // 提取 mel 时加 STFT 上下文，再裁掉边缘补帧
-            int padContext = (config.FftSize / 2 + config.FeatureHop - 1) / config.FeatureHop * config.FeatureHop;
-            int padFront = Math.Min(padContext, startSample);
-            int padTail = Math.Min(padContext, audio.Length - endSample);
-            var centers = Enumerable.Range(0, Math.Max(0, (endSample - startSample + padFront + padTail - 1) / config.FeatureHop + 1))
-                .Select(i => startSample - padFront + i * config.FeatureHop)
+            // Extract reads each centered STFT window from the full recording, so
+            // it already has context without adding frames to the phone timeline.
+            var centers = Enumerable.Range(0, (endSample - startSample + config.FeatureHop - 1) / config.FeatureHop)
+                .Select(i => startSample + i * config.FeatureHop)
                 .ToArray();
-            var melExt = melExtractor.Extract(audio, centers);
-            int cropFront = padFront / config.FeatureHop;
-            int cropTail = padTail / config.FeatureHop;
-            var melFull = HiFiUtauMath.SliceMel(melExt, cropFront, Math.Max(cropFront, melExt.GetLength(1) - cropTail));
+            var melFull = melExtractor.Extract(audio, centers);
             int nFrames = melFull.GetLength(1);
             if (nFrames == 0) {
                 return new float[config.NumMels, 0];
