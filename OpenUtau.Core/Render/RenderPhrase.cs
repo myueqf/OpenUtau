@@ -217,14 +217,14 @@ namespace OpenUtau.Core.Render {
         public readonly float[] pitchesBeforeDeviation;
         public readonly float[] dynamics;
         public readonly float[] gender;
-        public readonly bool[] genderCurveActive = Array.Empty<bool>();
+        public readonly bool[] genderCurveActive;
         public readonly float[] breathiness;
-        public readonly bool[] breathinessCurveActive = Array.Empty<bool>();
+        public readonly bool[] breathinessCurveActive;
         public readonly float[] toneShift;
         public readonly float[] tension;
-        public readonly bool[] tensionCurveActive = Array.Empty<bool>();
+        public readonly bool[] tensionCurveActive;
         public readonly float[] voicing;
-        public readonly bool[] voicingCurveActive = Array.Empty<bool>();
+        public readonly bool[] voicingCurveActive;
         public readonly float[] xsy;
         public readonly Tuple<string, float[]>[] curves;//custom curves defined by renderer
         /// <summary>
@@ -506,6 +506,10 @@ namespace OpenUtau.Core.Render {
             }
 
             var curves = new List<Tuple<string, float[]>>();
+            genderCurveActive = Array.Empty<bool>();
+            breathinessCurveActive = Array.Empty<bool>();
+            tensionCurveActive = Array.Empty<bool>();
+            voicingCurveActive = Array.Empty<bool>();
 
             foreach (var descriptor in inputs?.Descriptors ?? source.CurveDescriptors) {
                 var curve = source.Curves.FirstOrDefault(c => c.Abbr == descriptor.abbr)
@@ -570,19 +574,19 @@ namespace OpenUtau.Core.Render {
                     case Format.Ustx.SHFC: toneShift = curveSampled; break;
                     case Format.Ustx.GENC:
                         gender = curveSampled;
-                        genderCurveActive = curveActive;
+                        genderCurveActive = curve.IsEmpty ? curveActive : ActiveCurve(curve, curveSampled.Length);
                         break;
                     case Format.Ustx.TENC:
                         tension = curveSampled;
-                        tensionCurveActive = curveActive;
+                        tensionCurveActive = curve.IsEmpty ? curveActive : ActiveCurve(curve, curveSampled.Length);
                         break;
                     case Format.Ustx.BREC:
                         breathiness = curveSampled;
-                        breathinessCurveActive = curveActive;
+                        breathinessCurveActive = curve.IsEmpty ? curveActive : ActiveCurve(curve, curveSampled.Length);
                         break;
                     case Format.Ustx.VOIC:
                         voicing = curveSampled;
-                        voicingCurveActive = curveActive;
+                        voicingCurveActive = curve.IsEmpty ? curveActive : ActiveCurve(curve, curveSampled.Length);
                         break;
                     case Format.Ustx.XSY:
                         xsy = curveSampled;
@@ -721,6 +725,10 @@ namespace OpenUtau.Core.Render {
             }
             sourceInputs.Add(source, inputs);
             return source;
+        }
+
+        internal static bool[] ActiveCurve(Pipeline.CurveSource curve, int length) {
+            return curve.IsEmpty ? Array.Empty<bool>() : Enumerable.Repeat(true, length).ToArray();
         }
 
         private ulong Hash(bool postEffect) {

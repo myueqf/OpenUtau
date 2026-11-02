@@ -4,11 +4,23 @@ using System.Linq;
 using System.Numerics;
 using NAudio.Wave;
 using OpenUtau.Classic.Hifisampler;
+using OpenUtau.Core.Pipeline;
+using OpenUtau.Core.Render;
 using OpenUtau.Core.Ustx;
 using Xunit;
 
 namespace OpenUtau.Core.HiFiUtau {
     public class HiFiUtauRendererTest {
+        [Fact]
+        public void GenderCurve_IsActiveWhenCurveHasPoints() {
+            var curve = new CurveSource("genc", new[] { 0, 5 }, new[] { 0, 100 }, 0, -100, false);
+
+            var active = RenderPhrase.ActiveCurve(curve, 4);
+
+            Assert.Equal(new[] { true, true, true, true }, active);
+            Assert.Empty(RenderPhrase.ActiveCurve(CurveSource.Empty("genc", 0, -100), 4));
+        }
+
         [Theory]
         [InlineData(500)]
         [InlineData(1000)]
