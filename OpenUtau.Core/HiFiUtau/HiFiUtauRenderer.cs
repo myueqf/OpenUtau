@@ -178,7 +178,7 @@ namespace OpenUtau.Core.HiFiUtau {
         static ulong ComputeRawHash(RenderPhrase phrase) {
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream)) {
-                writer.Write("hifiutau-v16-classic-source-timing");
+                writer.Write("hifiutau-v17-gender-frequency-scale");
                 writer.Write(phrase.preEffectHash);
                 WriteCurve(writer, phrase.pitches);
                 WriteCurve(writer, phrase.xsy);
@@ -393,7 +393,7 @@ namespace OpenUtau.Core.HiFiUtau {
                 cancellation.ThrowIfCancellationRequested();
                 phone.Mel = ExtractFeatureMel(phone, config, melExtractor, normalizer);
                 phone.Gender = SamplePhoneGender(phrase, phone, config);
-                ApplyPerPhoneControls(phone);
+                ApplyPerPhoneControls(phone, config);
             }
             MatchPhtp(phones, config.MsPerFeatureFrame);
             foreach (var phone in phones) {
@@ -520,12 +520,14 @@ namespace OpenUtau.Core.HiFiUtau {
             }
         }
 
-        static void ApplyPerPhoneControls(HiFiUtauPhone phone) {
+        internal static void ApplyPerPhoneControls(HiFiUtauPhone phone, HiFiUtauConfig config) {
             if (phone.Mel == null || phone.Mel.GetLength(1) == 0) {
                 return;
             }
             if (phone.Gender != null && phone.Gender.Any(value => Math.Abs(value) > 0.001f)) {
-                HiFiUtauMath.WarpMelFrequency(phone.Mel, phone.Gender.Select(value => -value / 100f).ToArray());
+                // Match Classic Hifisampler / Worldline: +100 lowers formants by 12 semitones.
+                HiFiUtauMath.WarpMelFrequency(phone.Mel,
+                    phone.Gender.Select(value => -0.12f * Math.Clamp(value, -100, 100)).ToArray(), config);
             } else {
                 double semitones = phone.ToneShift / 100.0;
                 if (Math.Abs(semitones) > 0.001) {

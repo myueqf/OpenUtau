@@ -3,6 +3,7 @@ using System.Linq;
 using System.Numerics;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using OpenUtau.Classic.Hifisampler;
 using OpenUtau.Core.Format;
 
 namespace OpenUtau.Core.HiFiUtau {
@@ -151,12 +152,18 @@ namespace OpenUtau.Core.HiFiUtau {
             }
         }
 
-        public static void WarpMelFrequency(float[,] mel, float[] semitoneCurve) {
+        public static void WarpMelFrequency(float[,] mel, float[] semitoneCurve, HiFiUtauConfig config) {
             int bins = mel.GetLength(0);
             int frames = mel.GetLength(1);
-            if (semitoneCurve.Length == 0 || frames == 0) {
+            if (semitoneCurve.Length == 0 || frames == 0 || bins == 0) {
                 return;
             }
+            // Mel bins are not linear in Hz. Shift their physical center frequencies,
+            // using the same Slaney scale and frequency limits as the extractor.
+            var frequencies = HifiMelBasis.MelFrequencies(bins + 2, config.MelFMin, config.MelFMax);
+            double minMel = HifiMelBasis.HzToMel(config.MelFMin);
+            double melStep = (HifiMelBasis.HzToMel(config.MelFMax) - minMel) / (bins + 1);
+            const double floor = 1e-9;
             var original = (float[,])mel.Clone();
             for (int t = 0; t < frames; t++) {
                 double semitones = ResampleCurve(semitoneCurve, t, frames);
@@ -165,11 +172,19 @@ namespace OpenUtau.Core.HiFiUtau {
                     continue;
                 }
                 for (int b = 0; b < bins; b++) {
-                    double src = Math.Clamp(b / factor, 0, bins - 1);
+                    double sourceHz = frequencies[b + 1] / factor;
+                    if (sourceHz < config.MelFMin || sourceHz > config.MelFMax) {
+                        // Out-of-band energy is absent, not a repeated edge band.
+                        mel[b, t] = (float)Math.Log(floor);
+                        continue;
+                    }
+                    double src = Math.Clamp((HifiMelBasis.HzToMel(sourceHz) - minMel) / melStep - 1, 0, bins - 1);
                     int b0 = (int)Math.Floor(src);
                     int b1 = Math.Min(bins - 1, b0 + 1);
-                    float frac = (float)(src - b0);
-                    mel[b, t] = original[b0, t] + (original[b1, t] - original[b0, t]) * frac;
+                    double frac = src - b0;
+                    // Mel stores log magnitudes; interpolate magnitudes before compression.
+                    double magnitude = Math.Exp(original[b0, t]) * (1 - frac) + Math.Exp(original[b1, t]) * frac;
+                    mel[b, t] = (float)Math.Log(Math.Max(magnitude, floor));
                 }
             }
         }

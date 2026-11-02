@@ -3,11 +3,51 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using NAudio.Wave;
+using OpenUtau.Classic.Hifisampler;
 using OpenUtau.Core.Ustx;
 using Xunit;
 
 namespace OpenUtau.Core.HiFiUtau {
     public class HiFiUtauRendererTest {
+        [Theory]
+        [InlineData(500)]
+        [InlineData(1000)]
+        [InlineData(4000)]
+        public void GenderCurve_ShiftsFormantsByAnOctaveAtFullScale(double sourceHz) {
+            var config = new HiFiUtauConfig();
+            var frequencies = HifiMelBasis.MelFrequencies(config.NumMels + 2, config.MelFMin, config.MelFMax);
+            var mel = new float[config.NumMels, 4];
+            for (int b = 0; b < config.NumMels; b++) {
+                // A spectral envelope with a known formant, spanning both Slaney regions.
+                double distance = (frequencies[b + 1] - sourceHz) / (sourceHz * 0.08);
+                for (int t = 0; t < 3; t++) {
+                    mel[b, t] = (float)Math.Log(Math.Max(Math.Exp(-0.5 * distance * distance), 1e-9));
+                }
+                mel[b, 3] = (float)Math.Log(1e-9);
+            }
+            var original = (float[,])mel.Clone();
+            var phone = new HiFiUtauPhone {
+                Mel = mel,
+                Gender = [100, 0, -100, 100],
+            };
+
+            HiFiUtauRenderer.ApplyPerPhoneControls(phone, config);
+
+            double[] expectedHz = [sourceHz / 2, sourceHz, sourceHz * 2];
+            for (int t = 0; t < expectedHz.Length; t++) {
+                int peak = Enumerable.Range(0, config.NumMels).MaxBy(b => mel[b, t]);
+                double binWidth = frequencies[peak + 2] - frequencies[peak];
+                Assert.InRange(Math.Abs(frequencies[peak + 1] - expectedHz[t]), 0, binWidth);
+            }
+            for (int b = 0; b < config.NumMels; b++) {
+                Assert.Equal(original[b, 1], mel[b, 1]);
+                Assert.Equal(original[b, 3], mel[b, 3]);
+                if (frequencies[b + 1] > config.MelFMax / 2) {
+                    Assert.Equal((float)Math.Log(1e-9), mel[b, 0]);
+                }
+            }
+        }
+
         [Theory]
         [InlineData(100, 0, 0)]
         [InlineData(50, 0, 0)]
