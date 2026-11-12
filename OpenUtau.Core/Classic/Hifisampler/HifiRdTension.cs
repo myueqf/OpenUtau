@@ -6,7 +6,8 @@ namespace OpenUtau.Classic.Hifisampler {
     /// Tension as Rd (<see cref="GlottalRd"/>) on the harmonic part, in place of hifisampler's
     /// spectral tilt: Rd per frame fitted to the STFT's harmonic peaks at the source f0, and
     /// each frame reshaped by the gains of moving it, on the harmonics of the note's pitch at
-    /// that frame. No renormalization: the first harmonic keeps its level.
+    /// that frame. By default the first harmonic keeps its level; callers that already
+    /// normalized their input can opt into frame-energy compensation.
     /// </summary>
     internal static class HifiRdTension {
         public const int NFft = 2048;
@@ -17,8 +18,10 @@ namespace OpenUtau.Classic.Hifisampler {
         /// <param name="sourceF0">Source f0 (Hz, 0 unvoiced) on frames of <see cref="Hop"/> samples.</param>
         /// <param name="tensionAt">The tension curve (-100..100) at a sample.</param>
         /// <param name="targetF0At">The note's f0 (Hz) at a sample.</param>
+        /// <param name="normalizationAt">Optional energy compensation strength (0..1) at a sample.</param>
         public static float[] Apply(float[] x, double[] sourceF0, int sampleRate,
-                Func<double, double> tensionAt, Func<double, double> targetF0At) {
+                Func<double, double> tensionAt, Func<double, double> targetF0At,
+                Func<double, double>? normalizationAt = null) {
             // Zero-padded to whole frames, so the inverse covers every sample.
             var signal = new double[(x.Length + Hop - 1) / Hop * Hop];
             for (int i = 0; i < x.Length; i++) {
@@ -56,8 +59,24 @@ namespace OpenUtau.Classic.Hifisampler {
                 double f0 = targetF0At(m * Hop);
                 var gains = GlottalRd.Gains(rd[m], GlottalRd.TenseRd(rd[m], t), f0, (int)(sampleRate / 2.0 / f0));
                 var frame = spec[m];
+                double strength = Math.Clamp(normalizationAt?.Invoke(m * Hop) ?? 0, 0, 1);
+                double before = 0, after = 0;
                 for (int k = 0; k < frame.Length; k++) {
-                    frame[k] *= GlottalRd.GainAt(gains, f0, k * binHz);
+                    double gain = GlottalRd.GainAt(gains, f0, k * binHz);
+                    if (strength > 0) {
+                        // Parseval energy of a real FFT: only DC and Nyquist are unpaired.
+                        double weight = k == 0 || k == frame.Length - 1 ? 1 : 2;
+                        double energy = weight * (frame[k].Real * frame[k].Real + frame[k].Imaginary * frame[k].Imaginary);
+                        before += energy;
+                        after += energy * gain * gain;
+                    }
+                    frame[k] *= gain;
+                }
+                if (strength > 0 && before > 1e-12 && after > 1e-12) {
+                    double compensation = Math.Pow(before / after, 0.5 * strength);
+                    for (int k = 0; k < frame.Length; k++) {
+                        frame[k] *= compensation;
+                    }
                 }
             }
 

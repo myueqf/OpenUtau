@@ -253,6 +253,7 @@ namespace OpenUtau.Core.HiFiUtau {
             int frames = (samples.Length + hop - 1) / hop + 1;
             var tensionFrames = AudioPostProcessingDsp.ResampleCurve(tension, frames, 0);
             var f0Frames = AudioPostProcessingDsp.PitchHzCurve(phrase, frames);
+            var normalization = HiFiUtauLoudnessNormalizer.TensionStrengths(phrase, frames, hop);
             var sourceF0 = new double[frames];
             for (int i = 0; i < frames; i++) {
                 sourceF0[i] = f0Frames[i];
@@ -260,7 +261,8 @@ namespace OpenUtau.Core.HiFiUtau {
             int FrameIndex(double sample) => Math.Clamp((int)(sample / hop), 0, frames - 1);
             return HifiRdTension.Apply(samples, sourceF0, SampleRate,
                 sample => Math.Clamp(tensionFrames[FrameIndex(sample)], -100, 100),
-                sample => sourceF0[FrameIndex(sample)]);
+                sample => sourceF0[FrameIndex(sample)],
+                sample => normalization[FrameIndex(sample)]);
         }
 
         static void MixComponents(float[] samples, float[] harmonic, float[] noise, int length) {
