@@ -42,16 +42,19 @@ namespace OpenUtau.Core.HiFiUtau {
                 XXH64.DigestOf(File.ReadAllBytes(configPath));
         }
 
-        public float[,,] ProcessFeatureSplice(HiFiUtauPhone[] phones, int totalModelFrames = 0) {
+        public float[,,] ProcessFeatureSplice(HiFiUtauPhone[] phones, double phraseStartMs, int totalModelFrames = 0) {
             // 按模型hop帧时间线拼接音素，重叠处在隐空间交叉淡化
             double ratio = Config.FeatureHop / (double)Config.ModelHop;
             var segments = new List<float[,,]>();
             int previousEndFrame = 0;
+            HiFiUtauPhone? lastPhone = null;
             foreach (var phone in phones) {
                 var feat = EncodeOne(phone.Mel, ratio, phone.ModelFrames > 0 ? phone.ModelFrames : null);
                 if (feat == null) {
                     continue;
                 }
+                var previousPhone = lastPhone;
+                lastPhone = phone;
 
                 int gapFrames = Math.Max(0, phone.ModelStartFrame - previousEndFrame);
                 if (gapFrames > 0) {
@@ -80,7 +83,9 @@ namespace OpenUtau.Core.HiFiUtau {
                 segments[^1] = SliceFeat(last, 0, last.GetLength(2) - overlapFeat);
                 segments.Add(CrossFadeFeat(
                     SliceFeat(last, last.GetLength(2) - overlapFeat, last.GetLength(2)),
-                    SliceFeat(feat, 0, overlapFeat)));
+                    SliceFeat(feat, 0, overlapFeat), previousPhone!, phone,
+                    phraseStartMs + phone.ModelStartFrame * Config.MsPerModelFrame,
+                    Config.MsPerModelFrame / Config.FeatUpsample));
                 segments.Add(SliceFeat(feat, overlapFeat, feat.GetLength(2)));
             }
             if (totalModelFrames > previousEndFrame) {
@@ -300,12 +305,20 @@ namespace OpenUtau.Core.HiFiUtau {
             return result;
         }
 
-        static float[,,] CrossFadeFeat(float[,,] a, float[,,] b) {
+        internal static float[,,] CrossFadeFeat(float[,,] a, float[,,] b,
+            HiFiUtauPhone previous, HiFiUtauPhone next, double startMs, double msPerFrame) {
             int channels = a.GetLength(1);
             int frames = Math.Min(a.GetLength(2), b.GetLength(2));
             var result = new float[1, channels, frames];
             for (int t = 0; t < frames; t++) {
-                float fi = frames == 1 ? 1 : t / (float)(frames - 1);
+                double positionMs = startMs + t * msPerFrame;
+                float previousGain = HiFiUtauMath.PhoneFadeGain(previous, positionMs);
+                float nextGain = HiFiUtauMath.PhoneFadeGain(next, positionMs);
+                float totalGain = previousGain + nextGain;
+                // Keep latent features normalized; the sum of the independent fades is
+                // applied to the waveform. Normalizing that sum away would hide edits.
+                float fi = totalGain > 0 ? nextGain / totalGain :
+                    frames == 1 ? 1 : t / (float)(frames - 1);
                 float fo = 1 - fi;
                 for (int c = 0; c < channels; c++) {
                     result[0, c, t] = a[0, c, t] * fo + b[0, c, t] * fi;
