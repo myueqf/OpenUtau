@@ -224,21 +224,16 @@ namespace OpenUtau.Core.HiFiUtau {
 
         static void ApplyBreath(float[] noise, float[]? breathiness, int length) {
             for (int i = 0; i < length; i++) {
-                int idx = SampleIndexToCurveIndex(i, length, breathiness);
-                double ratio = AudioPostProcessingDsp.CurveValue(breathiness, idx, 0) / 100.0;
-                double gain = ratio > 0 ? 1.0 + ratio * 3.0 : 1.0 + ratio;
-                noise[i] *= (float)Math.Clamp(gain, 0.0, 10.0);
+                double value = SampleCurveValue(i, length, breathiness, 0);
+                noise[i] *= (float)HifiSourceCurves.NoiseGain(value);
             }
         }
 
         static void ApplyVoicing(float[] harmonic, float[]? voicing, int length) {
             for (int i = 0; i < length; i++) {
-                int idx = SampleIndexToCurveIndex(i, length, voicing);
-                double gain = Math.Clamp(AudioPostProcessingDsp.CurveValue(voicing, idx, 100), 0, 500) / 100.0;
+                double value = SampleCurveValue(i, length, voicing, 100);
+                double gain = HifiSourceCurves.HarmonicGain(value);
                 harmonic[i] *= (float)gain;
-                if (gain < 1e-8) {
-                    harmonic[i] = 0;
-                }
             }
         }
 
@@ -316,10 +311,12 @@ namespace OpenUtau.Core.HiFiUtau {
             for (int i = 0; i < length; i++) {
                 samples[i] = harmonic[i] + noise[i];
             }
-            SoftLimitIfClipped(samples, length);
+            NormalizePeakIfClipped(samples, length);
         }
 
-        static void SoftLimitIfClipped(float[] samples, int length) {
+        // Match Hifisampler's linear peak protection without adding saturation harmonics.
+        // Normalize after mixing to preserve the chosen harmonic/noise balance.
+        static void NormalizePeakIfClipped(float[] samples, int length) {
             double peak = 0;
             for (int i = 0; i < length; i++) {
                 peak = Math.Max(peak, Math.Abs(samples[i]));
@@ -329,27 +326,21 @@ namespace OpenUtau.Core.HiFiUtau {
             }
 
             for (int i = 0; i < length; i++) {
-                samples[i] = (float)(Math.Tanh(samples[i] * 0.9) / 0.9);
-            }
-
-            double newPeak = 0;
-            for (int i = 0; i < length; i++) {
-                newPeak = Math.Max(newPeak, Math.Abs(samples[i]));
-            }
-            if (newPeak <= 1e-8) {
-                return;
-            }
-            double scale = Math.Min(peak, 1.0) / newPeak;
-            for (int i = 0; i < length; i++) {
-                samples[i] *= (float)scale;
+                samples[i] = (float)(samples[i] / peak);
             }
         }
 
-        static int SampleIndexToCurveIndex(int sampleIndex, int sampleLength, float[]? curve) {
-            if (curve == null || curve.Length <= 1 || sampleLength <= 1) {
-                return 0;
+        static double SampleCurveValue(int sampleIndex, int sampleLength, float[]? curve, float defaultValue) {
+            if (curve == null || curve.Length == 0) {
+                return defaultValue;
             }
-            return Math.Clamp((int)Math.Round(sampleIndex * (curve.Length - 1.0) / (sampleLength - 1)), 0, curve.Length - 1);
+            if (curve.Length == 1 || sampleLength <= 1) {
+                return curve[0];
+            }
+            double position = Math.Clamp(sampleIndex * (curve.Length - 1.0) / (sampleLength - 1), 0, curve.Length - 1);
+            int left = (int)position;
+            int right = Math.Min(left + 1, curve.Length - 1);
+            return curve[left] + (curve[right] - curve[left]) * (position - left);
         }
 
         static void ReadFrame(float[] samples, float[] window, int outStart, float[] frame) {
@@ -374,9 +365,9 @@ namespace OpenUtau.Core.HiFiUtau {
 
         /// <summary>
         /// Apply BREL (低频气声) and BREH (高频气声) to noise component using STFT crossover at 2000Hz.
-        /// BREL: gain on low band (&lt; 2000Hz). Positive: 1→×4, Negative: 1→0.
+        /// BREL: gain on low band (&lt; 2000Hz). Positive: 1→×3, Negative: 1→0.
         /// BREH: gain on high band (&gt; 2000Hz). Same gain formula.
-        /// Matching Python apply_breath_band_gain.
+        /// Uses Hifisampler's noise gain mapping for each band.
         /// </summary>
         static float[] ApplyBrelBreh(float[] noise, float[]? brelCurve, float[]? brehCurve, int length) {
             int originalLength = length;
@@ -399,15 +390,8 @@ namespace OpenUtau.Core.HiFiUtau {
                 AudioPostProcessingDsp.DirectRealFft(frame, spectrum, fft);
 
                 // Per-frame gain values from curves
-                int idx = SampleIndexToCurveIndex(outStart, originalLength, brelCurve);
-                double brelRatio = AudioPostProcessingDsp.CurveValue(brelCurve, idx, 0) / 100.0;
-                double brelGain = brelRatio > 0 ? 1.0 + brelRatio * 3.0 : 1.0 + brelRatio;
-                brelGain = Math.Clamp(brelGain, 0.0, 10.0);
-
-                idx = SampleIndexToCurveIndex(outStart, originalLength, brehCurve);
-                double brehRatio = AudioPostProcessingDsp.CurveValue(brehCurve, idx, 0) / 100.0;
-                double brehGain = brehRatio > 0 ? 1.0 + brehRatio * 3.0 : 1.0 + brehRatio;
-                brehGain = Math.Clamp(brehGain, 0.0, 10.0);
+                double brelGain = HifiSourceCurves.NoiseGain(SampleCurveValue(outStart, originalLength, brelCurve, 0));
+                double brehGain = HifiSourceCurves.NoiseGain(SampleCurveValue(outStart, originalLength, brehCurve, 0));
 
                 // Apply frequency-crossover gain
                 for (int bin = 0; bin < bins; bin++) {
@@ -515,7 +499,6 @@ namespace OpenUtau.Core.HiFiUtau {
                 int src = i + FftSize / 2;
                 result[i] = norm[src] > 1e-8 ? output[src] / norm[src] : 0;
             }
-            SoftLimitIfClipped(result, result.Length);
             return result;
         }
     }
