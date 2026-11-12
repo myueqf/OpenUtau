@@ -104,7 +104,7 @@ namespace OpenUtau.Core.HiFiUtau {
 
                     var rawHash = ComputeRawHash(phrase);
                     var rawWavPath = Path.Join(rawDir, $"{model.Hash:x16}-{rawHash:x16}.wav");
-                    var finalWavPath = Path.Join(finalDir, $"{model.Hash:x16}-{rawHash:x16}-{phrase.hash:x16}-classic-direct-v2-hg-growl.wav");
+                    var finalWavPath = Path.Join(finalDir, $"{model.Hash:x16}-{rawHash:x16}-{phrase.hash:x16}-classic-direct-v2-hg-growl-rd-tension-v1.wav");
                     var hnsepHarmonicPath = Path.Join(hnsepDir, $"harmonic-{model.Hash:x16}-{rawHash:x16}.wav");
                     var hnsepNoisePath = Path.Join(hnsepDir, $"noise-{model.Hash:x16}-{rawHash:x16}.wav");
                     phrase.AddCacheFile(finalWavPath);
