@@ -155,6 +155,9 @@ namespace OpenUtau.Core.HiFiUtau {
                                 var pitchHzCurve = AudioPostProcessingDsp.PitchHzCurve(phrase, result.samples.Length);
                                 AudioPostProcessor.ApplyDistortion(result.samples, postCurves.Distortion, AudioPostProcessingDsp.SampleRate, pitchHzCurve);
                             }
+                            // HN-SEP and the spectral effects can leave energy across a faded
+                            // boundary. Apply the time envelope once, after all these effects.
+                            ApplyPhoneFades(phones, secondaryPhones, phrase, result.samples);
                             // Overlay raw samples for direct phonemes after synthesis and before
                             // ApplyPhoneVolumes (so the VOL expression also scales the direct audio).
                             ApplyDirectPhones(result.samples, phones, phrase, HiFiUtauConfig.OutputSampleRate);
@@ -178,7 +181,7 @@ namespace OpenUtau.Core.HiFiUtau {
         static ulong ComputeRawHash(RenderPhrase phrase) {
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream)) {
-                writer.Write("hifiutau-v17-gender-frequency-scale");
+                writer.Write("hifiutau-v19-encoder-tail-final-fades");
                 writer.Write(phrase.preEffectHash);
                 WriteCurve(writer, phrase.pitches);
                 WriteCurve(writer, phrase.xsy);
@@ -515,7 +518,10 @@ namespace OpenUtau.Core.HiFiUtau {
                 double startMs = phone.PositionMs + phone.Envelope[0].X - phraseStartMs;
                 double endMs = phone.PositionMs + phone.Envelope[4].X - phraseStartMs;
                 phone.ModelStartFrame = Math.Max(0, HiFiUtauMath.FramesForMs(startMs, config.MsPerModelFrame));
-                phone.ModelEndFrame = Math.Max(phone.ModelStartFrame + 1, HiFiUtauMath.FramesForMs(endMs, config.MsPerModelFrame));
+                // Cover the complete release. Rounding down cuts off the waveform
+                // before the sample-domain envelope has reached zero.
+                phone.ModelEndFrame = Math.Max(phone.ModelStartFrame + 1,
+                    (int)Math.Ceiling(endMs / config.MsPerModelFrame));
                 phone.ModelFrames = phone.ModelEndFrame - phone.ModelStartFrame;
             }
         }
