@@ -57,12 +57,49 @@ namespace OpenUtau.Core.HiFiUtau {
                 PositionMs = 100,
                 Envelope = [new(-20, 0), new(-10, 100), new(0, 100), new(80, 100), new(100, 0)],
             };
-            var samples = Enumerable.Repeat(1f, 220).ToArray();
-            HiFiUtauMath.ApplyPhraseEdgeEnvelope([phone], samples, 1000, 0);
+            var samples = HiFiUtauMath.BuildPhoneFadeEnvelope([phone], 220, 1000, 0);
             Assert.All(samples.Take(81), sample => Assert.Equal(0f, sample));
             Assert.Equal(1f, samples[90]);
             Assert.Equal(1f, samples[179]);
-            Assert.All(samples.Skip(199), sample => Assert.Equal(0f, sample));
+            Assert.Equal(0.05f, samples[199]);
+            Assert.All(samples.Skip(200), sample => Assert.Equal(0f, sample));
+        }
+
+        [Theory]
+        [InlineData(20, 20, 1, 15, 1)]
+        [InlineData(20, 60, 2.0 / 3, 17.5, 1)]
+        [InlineData(80, 20, 0.625, 12, 0.625)]
+        [InlineData(80, 60, 7.0 / 24, 100.0 / 7, 0.625)]
+        [InlineData(10, 10, 2, 15, 1)]
+        public void OverlapUsesIndependentAttackAndRelease(double attackMs, double releaseMs,
+            double expectedGain, double expectedFeature, double expectedAfterOverlap) {
+            var previous = new HiFiUtauPhone {
+                PositionMs = 0,
+                Envelope = [new(0, 0), new(10, 100), new(20, 100),
+                    new((float)(120 - releaseMs), 100), new(120, 0)],
+            };
+            var next = new HiFiUtauPhone {
+                PositionMs = 100,
+                Envelope = [new(0, 0), new((float)attackMs, 100), new((float)attackMs, 100),
+                    new(120, 100), new(140, 0)],
+            };
+            var gains = HiFiUtauMath.BuildPhoneFadeEnvelope([previous, next], 240, 1000, 0);
+            Assert.Equal(expectedGain, gains[110], 6);
+            // A long attack still attenuates the phone after the preceding phone ends.
+            Assert.Equal(expectedAfterOverlap, gains[150], 6);
+            // A long release also starts before the overlap begins.
+            Assert.Equal(releaseMs > 40 ? 40 / releaseMs : 1, gains[80], 6);
+
+            var a = new float[1, 1, 21];
+            var b = new float[1, 1, 21];
+            for (int t = 0; t < 21; t++) {
+                a[0, 0, t] = 10;
+                b[0, 0, t] = 20;
+            }
+            var blended = HiFiUtauModel.CrossFadeFeat(a, b, previous, next, 100, 1);
+            Assert.Equal(expectedFeature, blended[0, 0, 10], 5);
+            Assert.Equal(10f, a[0, 0, 10]);
+            Assert.Equal(20f, b[0, 0, 10]);
         }
     }
 }
