@@ -243,73 +243,26 @@ namespace OpenUtau.Core.HiFiUtau {
         }
 
         static float[] ApplyTension(float[] samples, float[]? tension, RenderPhrase phrase) {
-            // 频谱倾斜锚定在约第四谐波，随音高变化
-            int originalLength = samples.Length;
-            int frames = Math.Max(1, (originalLength + Hop - 1) / Hop + 1);
-            int bins = FftSize / 2 + 1;
+            if (samples.Length == 0) {
+                return samples;
+            }
+            // HN-SEP operates on the rendered audio, so its harmonic peaks are already
+            // at the phrase pitch. Use that pitch for both Rd fitting and reshaping.
+            // Match HifiRdTension's centered, zero-padded STFT frame grid.
+            int hop = HifiRdTension.Hop;
+            int frames = (samples.Length + hop - 1) / hop + 1;
             var tensionFrames = AudioPostProcessingDsp.ResampleCurve(tension, frames, 0);
             var f0Frames = AudioPostProcessingDsp.PitchHzCurve(phrase, frames);
-            var window = AudioPostProcessingDsp.HannWindow(FftSize);
-            var output = new float[originalLength + FftSize];
-            var norm = new float[output.Length];
-            var fft = AudioPostProcessingDsp.CreateRealFftWorkspace(FftSize);
-            var frame = new float[FftSize];
-            var spectrum = new Complex[bins];
-
-            for (int frameIndex = 0; frameIndex < frames; frameIndex++) {
-                float tv = tensionFrames[frameIndex];
-                double b = tv > 0 ? -tv / 150.0 : -tv / 50.0;
-                int outStart = frameIndex * Hop;
-                ReadFrame(samples, window, outStart, frame);
-                if (Math.Abs(b) < 0.001) {
-                    OverlapAdd(frame, window, output, norm, outStart);
-                    continue;
-                }
-
-                double midpointHz = f0Frames[frameIndex] < 30
-                    ? 1500
-                    : Math.Clamp(f0Frames[frameIndex] * 4.0, 400.0, 6000.0);
-                double x0 = bins / ((SampleRate / 2.0) / midpointHz);
-                AudioPostProcessingDsp.DirectRealFft(frame, spectrum, fft);
-
-                var originalMag = new double[bins];
-                double originalSum = 0;
-                for (int bin = 0; bin < bins; bin++) {
-                    originalMag[bin] = spectrum[bin].Magnitude;
-                    originalSum += originalMag[bin];
-                }
-
-                double newSum = 0;
-                for (int bin = 0; bin < bins; bin++) {
-                    double tilt = Math.Clamp((-b / Math.Max(1.0, x0)) * bin + b, -2.0, 2.0);
-                    double gain = Math.Exp(tilt);
-                    spectrum[bin] *= gain;
-                    newSum += originalMag[bin] * gain;
-                }
-                if (originalSum > 1e-12 && newSum > 1e-12) {
-                    double comp = originalSum / newSum;
-                    for (int bin = 0; bin < bins; bin++) {
-                        spectrum[bin] *= comp;
-                    }
-                }
-                if (b < -0.001) {
-                    double bGain = 1.0 + Math.Clamp(b / -15.0, 0.0, 0.33);
-                    for (int bin = 0; bin < bins; bin++) {
-                        spectrum[bin] *= bGain;
-                    }
-                }
-
-                AudioPostProcessingDsp.InverseRealFft(spectrum, frame, fft);
-                OverlapAdd(frame, window, output, norm, outStart);
+            var normalization = HiFiUtauLoudnessNormalizer.TensionStrengths(phrase, frames, hop);
+            var sourceF0 = new double[frames];
+            for (int i = 0; i < frames; i++) {
+                sourceF0[i] = f0Frames[i];
             }
-
-            var result = new float[originalLength];
-            for (int i = 0; i < result.Length; i++) {
-                int src = i + FftSize / 2;
-                result[i] = norm[src] > 1e-8 ? output[src] / norm[src] : 0;
-            }
-            SoftLimitIfClipped(result, result.Length);
-            return result;
+            int FrameIndex(double sample) => Math.Clamp((int)(sample / hop), 0, frames - 1);
+            return HifiRdTension.Apply(samples, sourceF0, SampleRate,
+                sample => Math.Clamp(tensionFrames[FrameIndex(sample)], -100, 100),
+                sample => sourceF0[FrameIndex(sample)],
+                sample => normalization[FrameIndex(sample)]);
         }
 
         static void MixComponents(float[] samples, float[] harmonic, float[] noise, int length) {
