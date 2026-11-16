@@ -75,6 +75,7 @@ namespace OpenUtau.App.Views {
             applying = true;
             try {
                 (DataContext as ExpressionsViewModel)?.Apply();
+                Close();
             } catch (Exception e) {
                 MessageBox.ShowError(this, e);
             } finally {
