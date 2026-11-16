@@ -148,8 +148,11 @@ namespace OpenUtau.Core.HiFiUtau {
             int targetFrames = targetModelFrames ??
                 Math.Max(1, (int)Math.Round(mel.GetLength(1) * ratio, MidpointRounding.AwayFromZero));
             var melForEncoder = ResampleMel(mel, targetFrames);
-            if (Config.EncoderPadFrames > 0) {
-                melForEncoder = PadMelLeftRepeat(melForEncoder, Config.EncoderPadFrames);
+            if (Config.EncoderPadFrames > 0 || Config.EncoderTailPadFrames > 0) {
+                // part1 also needs right context. Padding part2 cannot repair features
+                // already corrupted by the encoder's zero-padded right boundary.
+                melForEncoder = PadMelEdges(melForEncoder,
+                    Config.EncoderPadFrames, Config.EncoderTailPadFrames);
             }
 
             ulong cacheKey = HashMel(melForEncoder);
@@ -160,8 +163,9 @@ namespace OpenUtau.Core.HiFiUtau {
             }
 
             var feat = Part1Encode(melForEncoder);
-            if (Config.EncoderPadFrames > 0) {
-                feat = SliceFeat(feat, Config.EncoderPadFrames * Config.FeatUpsample, feat.GetLength(2));
+            if (Config.EncoderPadFrames > 0 || Config.EncoderTailPadFrames > 0) {
+                feat = SliceFeat(feat, Config.EncoderPadFrames * Config.FeatUpsample,
+                    (Config.EncoderPadFrames + targetFrames) * Config.FeatUpsample);
             }
             lock (featureCacheLock) {
                 if (!featureCache.ContainsKey(cacheKey)) {
@@ -273,16 +277,13 @@ namespace OpenUtau.Core.HiFiUtau {
             return result;
         }
 
-        static float[,] PadMelLeftRepeat(float[,] mel, int count) {
+        static float[,] PadMelEdges(float[,] mel, int left, int right) {
             int bins = mel.GetLength(0);
             int frames = mel.GetLength(1);
-            var result = new float[bins, count + frames];
+            var result = new float[bins, left + frames + right];
             for (int b = 0; b < bins; b++) {
-                for (int t = 0; t < count; t++) {
-                    result[b, t] = mel[b, 0];
-                }
-                for (int t = 0; t < frames; t++) {
-                    result[b, count + t] = mel[b, t];
+                for (int t = 0; t < result.GetLength(1); t++) {
+                    result[b, t] = mel[b, Math.Clamp(t - left, 0, frames - 1)];
                 }
             }
             return result;

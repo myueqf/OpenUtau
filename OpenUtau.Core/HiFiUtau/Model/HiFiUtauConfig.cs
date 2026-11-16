@@ -17,6 +17,7 @@ namespace OpenUtau.Core.HiFiUtau {
         public double MelFMax { get; private set; } = 16000;
         public int FeatUpsample { get; private set; } = 64;
         public int EncoderPadFrames { get; private set; } = 8;
+        public int EncoderTailPadFrames { get; private set; } = 16;
         public int FrontPadFrames { get; private set; } = 6;
         public int TailPadFrames { get; private set; } = 4;
 
@@ -37,6 +38,7 @@ namespace OpenUtau.Core.HiFiUtau {
             config.FeatureHop = GetInt(root, "feature_hop_size", config.ModelHop / 8);
             config.FeatUpsample = GetInt(root, "feat_upsample", config.FeatUpsample);
             config.EncoderPadFrames = GetInt(root, "encoder_pad_frames", config.EncoderPadFrames);
+            config.EncoderTailPadFrames = GetInt(root, "encoder_tail_pad_frames", config.EncoderTailPadFrames);
             config.FrontPadFrames = GetInt(root, "front_pad_frames", config.FrontPadFrames);
             config.TailPadFrames = GetInt(root, "tail_pad_frames", config.TailPadFrames);
             if (root.TryGetProperty("upsample_rates", out var upsampleRates) &&
