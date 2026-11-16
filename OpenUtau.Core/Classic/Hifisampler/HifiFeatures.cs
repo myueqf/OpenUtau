@@ -50,6 +50,8 @@ namespace OpenUtau.Classic.Hifisampler {
             return b > 0 ? 1 + 0.02 * b : 1 + 0.01 * b;
         }
 
+        public static double HarmonicGain(double voicing) => Math.Clamp(voicing, 0, 150) / 100.0;
+
         public bool IsDefault => Breathiness.All(b => b == 0) && Voicing.All(v => v == 100) && !HasTension;
 
         /// <summary>A curve at a sample position, linear between frame centers (sample (m + 0.5) hop).</summary>
@@ -95,7 +97,7 @@ namespace OpenUtau.Classic.Hifisampler {
                 var h = harmonic(wave);
                 var voiced = new float[h.Length];
                 for (int i = 0; i < h.Length; i++) {
-                    double voicing = Math.Clamp(curves.At(curves.Voicing, i), 0, 150) / 100.0;
+                    double voicing = HifiSourceCurves.HarmonicGain(curves.At(curves.Voicing, i));
                     voiced[i] = (float)(voicing * h[i]);
                 }
                 if (curves.HasTension) {
