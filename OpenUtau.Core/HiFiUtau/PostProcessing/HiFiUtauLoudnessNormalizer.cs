@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using OpenUtau.Core.Render;
 
 namespace OpenUtau.Core.HiFiUtau {
@@ -81,6 +82,56 @@ namespace OpenUtau.Core.HiFiUtau {
             if (double.IsFinite(gain) && gain > 0 && Math.Abs(gain - 1.0) > 1e-9) {
                 HiFiUtauMath.AddLogGain(mel, Math.Log(gain));
             }
+        }
+
+        // Tension is applied after the normalized raw audio has been cached. Carry P
+        // into its frame-energy compensation, blending strengths across phone overlaps.
+        internal static double[] TensionStrengths(RenderPhrase phrase, int frames, int hop) {
+            var strengths = new double[frames];
+            var phones = HiFiUtauPhone.CreateAll(phrase);
+            if (phones.Length == 0 || frames == 0) {
+                return strengths;
+            }
+            if (phrase.secondaryPhones != null && phrase.xsy != null && phrase.xsy.Any(value => value > 0)) {
+                var secondary = HiFiUtauPhone.CreateAll(phrase.secondaryPhones);
+                phones = phones.Select((phone, i) => phone.WithTiming(secondary[i],
+                    HiFiUtauRenderer.SampleCrossSynthesisAt(phrase, phone.PositionMs))).ToArray();
+            }
+            static double Strength(HiFiUtauPhone phone) => phone.Direct || !double.IsFinite(phone.Normalize)
+                ? 0 : Math.Clamp(phone.Normalize, 0, 100) / 100;
+            int Frame(double ms) => Math.Clamp((int)Math.Round(
+                (ms - phrase.positionMs + phrase.leadingMs) * AnalysisSampleRate / (1000.0 * hop)), 0, frames);
+
+            double previous = Strength(phones[0]);
+            Array.Fill(strengths, previous);
+            int previousEnd = Frame(phones[0].PositionMs + phones[0].Envelope[4].X);
+            for (int i = 1; i < phones.Length; i++) {
+                var phone = phones[i];
+                int start = Frame(phone.PositionMs + phone.Envelope[0].X);
+                int end = Frame(phone.PositionMs + phone.Envelope[4].X);
+                if (end <= start) {
+                    continue;
+                }
+                double strength = Strength(phone);
+                if (start < previousEnd) {
+                    int overlapEnd = Math.Min(previousEnd, end);
+                    double from = strengths[start];
+                    for (int j = start; j < overlapEnd; j++) {
+                        double alpha = overlapEnd - start <= 1 ? 1 : (j - start) / (double)(overlapEnd - start - 1);
+                        strengths[j] = from + (strength - from) * alpha;
+                    }
+                    Array.Fill(strengths, strength, overlapEnd, end - overlapEnd);
+                } else {
+                    Array.Fill(strengths, previous, previousEnd, start - previousEnd);
+                    Array.Fill(strengths, strength, start, end - start);
+                }
+                if (end >= previousEnd) {
+                    previousEnd = end;
+                    previous = strength;
+                }
+            }
+            Array.Fill(strengths, previous, previousEnd, frames - previousEnd);
+            return strengths;
         }
 
         static double Peak(float[] samples, int start, int end) {
